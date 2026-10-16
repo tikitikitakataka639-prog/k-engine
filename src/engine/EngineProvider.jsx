@@ -59,21 +59,16 @@ export function parseKernelUrl(raw) {
 export function EngineProvider({ children }) {
   const mm = useSyncExternalStore(modelManager.subscribe, modelManager.getSnapshot);
 
-  // Arranque del motor (botón INICIAR MOTOR)
-  const [startPhase, setStartPhase] = useState("IDLE"); // IDLE · STARTING · RUNNING · FAILED
+  const [startPhase, setStartPhase] = useState("IDLE");
   const [startError, setStartError] = useState(null);
   const [hardware, setHardware] = useState(emptyHardware);
   const [manualVram, setManualVramState] = useState(null);
   const [kernelUrl, setKernelUrlState] = useState("");
   const [kernelUrlError, setKernelUrlError] = useState(null);
-
-  // Laboratorio
   const [messages, setMessages] = useState([]);
   const [labError, setLabError] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [metrics, setMetrics] = useState(emptyMetrics);
-
-  // Backend HTTP / diagnóstico
   const [control, setControl] = useState(emptyControl);
   const [apiState, setApiState] = useState({ ok: false, version: null });
 
@@ -85,7 +80,6 @@ export function EngineProvider({ children }) {
 
   const patchControl = useCallback((partial) => setControl((prev) => ({ ...prev, ...partial })), []);
 
-  /* ---------- ajustes persistidos (IndexedDB) + catálogo ---------- */
   useEffect(() => {
     let off = false;
     (async () => {
@@ -96,9 +90,7 @@ export function EngineProvider({ children }) {
       await modelManager.init();
       if (sel) modelManager.select(sel);
     })();
-    return () => {
-      off = true;
-    };
+    return () => { off = true; };
   }, []);
 
   useEffect(() => {
@@ -114,10 +106,7 @@ export function EngineProvider({ children }) {
 
   const saveKernelUrl = useCallback((raw) => {
     const r = parseKernelUrl(raw);
-    if (!r.ok) {
-      setKernelUrlError(r.error);
-      return false;
-    }
+    if (!r.ok) { setKernelUrlError(r.error); return false; }
     setKernelUrlError(null);
     setKernelUrlState(r.url);
     setSetting("kernelUrl", r.url);
@@ -128,7 +117,6 @@ export function EngineProvider({ children }) {
     setSetting("kernelUrl", "");
   }, []);
 
-  /* ---------- chat del laboratorio ---------- */
   const loadedId = mm.loadedId;
   const loadedStatus = loadedId ? mm.models[loadedId]?.status : null;
 
@@ -137,9 +125,7 @@ export function EngineProvider({ children }) {
     setGenerating(false);
     if (!loadedId) return undefined;
     loadChat(loadedId).then((m) => !off && setMessages(Array.isArray(m) ? m : []));
-    return () => {
-      off = true;
-    };
+    return () => { off = true; };
   }, [loadedId]);
 
   useEffect(
@@ -176,7 +162,7 @@ export function EngineProvider({ children }) {
                 if (window.opener && !window.opener.closed) {
                   postToKernelOpener(window.opener, { type: "KENGINE_RESPONSE", requestId, response: answer });
                 }
-              } catch { /* La ventana de KERNEL puede haberse cerrado. */ }
+              } catch { /* ignore */ }
             }
             return next;
           });
@@ -192,7 +178,7 @@ export function EngineProvider({ children }) {
               if (window.opener && !window.opener.closed) {
                 postToKernelOpener(window.opener, { type: "KENGINE_ERROR", requestId, error: String(d.message || "Fallo en la generación local"), code: "generation_failed" });
               }
-            } catch { /* La ventana de KERNEL puede haberse cerrado. */ }
+            } catch { /* ignore */ }
           }
         }
       }),
@@ -214,13 +200,9 @@ export function EngineProvider({ children }) {
     return true;
   }, []);
 
-  // Puente seguro entre la ventana abierta por KERNEL y el modelo WebLLM local.
-  // No usa la API serverless para inferencia ni acepta mensajes de otros orígenes.
   useEffect(() => {
-    const KERNEL_ORIGIN = KERNEL_ALLOWED_ORIGINS[0];
     const opener = window.opener;
     if (!opener) return undefined;
-
     const announce = () => {
       try {
         if (!opener.closed) {
@@ -230,9 +212,8 @@ export function EngineProvider({ children }) {
             model: mmRef.current.loadedId || null,
           });
         }
-      } catch { /* El opener puede haberse cerrado. */ }
+      } catch { /* ignore */ }
     };
-
     const onMessage = (event) => {
       if (!KERNEL_ALLOWED_ORIGINS.includes(event.origin) || event.source !== window.opener) return;
       const data = event.data;
@@ -240,9 +221,7 @@ export function EngineProvider({ children }) {
       const requestId = typeof data.requestId === "string" ? data.requestId.slice(0, 120) : "";
       const prompt = typeof data.message === "string" ? data.message.trim() : "";
       const replyError = (error, code) => {
-        try {
-          postToKernelOpener(window.opener, { type: "KENGINE_ERROR", requestId, error, code });
-        } catch { /* El opener puede haberse cerrado. */ }
+        try { postToKernelOpener(window.opener, { type: "KENGINE_ERROR", requestId, error, code }); } catch { /* ignore */ }
       };
       if (!requestId || !prompt || prompt.length > 8000) {
         replyError("Solicitud vacía o demasiado larga (máximo 8000 caracteres).", "invalid_request");
@@ -266,7 +245,6 @@ export function EngineProvider({ children }) {
         replyError("No se pudo iniciar la inferencia local. Comprueba que el modelo siga en READY.", "generation_not_started");
       }
     };
-
     window.addEventListener("message", onMessage);
     announce();
     return () => window.removeEventListener("message", onMessage);
@@ -278,3 +256,198 @@ export function EngineProvider({ children }) {
     setLabError(null);
     if (mmRef.current.loadedId) clearChat(mmRef.current.loadedId);
   }, []);
+
+  const selectModel = useCallback((id) => {
+    modelManager.select(id);
+    setSetting("selectedModel", id);
+  }, []);
+  const download = useCallback((id) => modelManager.download(id), []);
+  const unload = useCallback(() => modelManager.unload(), []);
+  const cancelDownload = useCallback(() => modelManager.cancel(), []);
+  const [formatResult, setFormatResult] = useState(null);
+  const deleteModel = useCallback(async (id) => {
+    const r = await modelManager.deleteModel(id);
+    setFormatResult({ id, ...r });
+    return r;
+  }, []);
+
+  const startEngine = useCallback(async () => {
+    if (keRef.current.started) return;
+    setStartPhase("STARTING");
+    setStartError(null);
+    try {
+      const hw = await detectHardware();
+      setHardware(hw);
+      modelManager.setHardware(hw, { vramGB: manualVram || null });
+      await modelManager.init();
+      await Promise.all(modelManager.getSnapshot().catalog.featured.map((m) => modelManager.refreshCache(m.id)));
+      keRef.current.started = true;
+      setStartPhase("RUNNING");
+    } catch (e) {
+      setStartError("No se pudo iniciar el motor: " + ((e && e.message) || e));
+      setStartPhase("FAILED");
+    }
+  }, [manualVram]);
+
+  const loadConfig = useCallback(async () => {
+    if (!keRef.current.apiOk) {
+      patchControl({ cfgMsg: "Sin API: arranca con `npm run dev` (o `node server.js`) para configurar el backend.", cfgDisabled: true });
+      return;
+    }
+    patchControl({ cfgToken: tokenGet(), cfgDisabled: false });
+    try {
+      const c = await api("/config");
+      patchControl({
+        cfgBackend: c.backend,
+        cfgBaseUrl: c.base_url,
+        cfgModel: c.model,
+        cfgKeyState: c.api_key_set ? "(guardada: " + c.api_key + ")" : "(sin definir)",
+        cfgMsg: "Entorno: " + c.env + " · token " + (c.auth_required ? "exigido" : "no exigido"),
+      });
+    } catch (e) {
+      patchControl({
+        cfgMsg:
+          e.status === 401
+            ? "El servidor exige token: escríbelo y pulsa GUARDAR."
+            : e.status === 403
+              ? "Configuración remota no permitida sin KENGINE_AUTH_TOKEN."
+              : "Error: " + e.message,
+      });
+    }
+  }, [patchControl]);
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const probe = await probeApi();
+      if (off) return;
+      keRef.current.apiOk = probe.ok;
+      setApiState(probe);
+      await loadConfig();
+    })();
+    return () => { off = true; };
+  }, [loadConfig]);
+
+  const saveConfig = useCallback(async () => {
+    const c = control;
+    tokenSet(c.cfgToken.trim());
+    const body = { backend: c.cfgBackend, base_url: c.cfgBaseUrl.trim(), model: c.cfgModel.trim() };
+    if (c.cfgApiKey) body.api_key = c.cfgApiKey;
+    try {
+      const saved = await api("/config", { method: "POST", body: JSON.stringify(body) });
+      patchControl({ cfgApiKey: "", cfgKeyState: saved.api_key_set ? "(guardada: " + saved.api_key + ")" : "(sin definir)", cfgMsg: "Guardado en la memoria del servidor." });
+    } catch (e) {
+      patchControl({ cfgMsg: "No se pudo guardar: " + e.message });
+    }
+  }, [control, patchControl]);
+
+  const testConfig = useCallback(async () => {
+    try {
+      const m = await api("/models");
+      const o = m.models.find((x) => x.backend === "openai-compatible");
+      patchControl({
+        cfgMsg: o
+          ? "Proveedor: " + o.id + " · comprobación: " + o.provider_check + (m.backends["openai-compatible"].error ? "\n" + m.backends["openai-compatible"].error : "")
+          : "OpenAI-compatible sin configurar (falta base URL y/o modelo).",
+      });
+    } catch (e) {
+      patchControl({ cfgMsg: "Error: " + e.message });
+    }
+  }, [patchControl]);
+
+  const reportState = useCallback(async () => {
+    const KE = keRef.current;
+    if (!KE.apiOk || !KE.cid) return;
+    const m = mmRef.current;
+    const id = m.loadedId;
+    const st = id ? m.models[id]?.status : "NOT_INSTALLED";
+    const key = st + "|" + id;
+    if (key === KE.lastReported) return;
+    KE.lastReported = key;
+    try {
+      await api("/bridge/state", {
+        method: "POST",
+        body: JSON.stringify({ client_id: KE.cid, loaded_model: st === "READY" || st === "GENERATING" ? id : null, state: st === "GENERATING" ? "READY" : st }),
+      });
+    } catch {
+      KE.lastReported = "";
+    }
+  }, []);
+
+  useEffect(() => {
+    reportState();
+  }, [loadedId, loadedStatus, reportState]);
+
+  const refreshCache = useCallback(async (id) => {
+    await modelManager.refreshCache(id);
+  }, []);
+
+  const runDiagnosis = useCallback(async () => {
+    try {
+      const s = await scanCaches();
+      const self = await cacheApiSelfTest();
+      const line = formatCacheSummary(s);
+      const diag = classifyDiag(s, self);
+      patchControl({ cacheSummary: line, diagOut: diag });
+    } catch (e) {
+      patchControl({ diagOut: String(e && e.message || e) });
+    }
+  }, [patchControl]);
+
+  const statusLines = useMemo(() => {
+    const lines = [];
+    lines.push("Fase: " + startPhase);
+    if (startError) lines.push("Error: " + startError);
+    lines.push("API: " + (apiState.ok ? "ok" : "no"));
+    if (loadedId) lines.push("Modelo: " + loadedId + " · " + (loadedStatus || "?"));
+    return lines;
+  }, [startPhase, startError, apiState.ok, loadedId, loadedStatus]);
+
+  const classes = useMemo(() => (hardware && hardware.class) || CLASS.UNKNOWN, [hardware]);
+  const cls = classes;
+
+  const value = useMemo(
+    () => ({
+      mm,
+      loadedId,
+      classes,
+      cls,
+      selectModel,
+      download,
+      cancelDownload,
+      unload,
+      deleteModel,
+      formatResult,
+      startPhase,
+      startError,
+      startEngine,
+      hardware,
+      manualVram,
+      setManualVram,
+      kernelUrl,
+      kernelUrlError,
+      saveKernelUrl,
+      clearKernelUrl,
+      messages,
+      sendChat,
+      cancelGenerate,
+      resetChat,
+      labError,
+      generating,
+      metrics,
+      chatReady: Boolean(loadedId) && mm.models[loadedId]?.status === "READY" && !generating,
+      inMemory: Boolean(loadedId) && IN_MEMORY.includes(mm.models[loadedId]?.status),
+      control,
+      patchControl,
+      saveConfig,
+      testConfig,
+      refreshCache,
+      runDiagnosis,
+      statusLines,
+      CLASS,
+    }),
+    [mm, loadedId, classes, cls, selectModel, download, cancelDownload, unload, deleteModel, formatResult, startPhase, startError, startEngine, hardware, manualVram, setManualVram, kernelUrl, kernelUrlError, saveKernelUrl, clearKernelUrl, messages, sendChat, cancelGenerate, resetChat, labError, generating, metrics, control, patchControl, saveConfig, testConfig, refreshCache, runDiagnosis, statusLines],
+  );
+
+  return <EngineContext.Provider value={value}>{children}</EngineContext.Provider>;
+}
