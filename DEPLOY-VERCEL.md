@@ -1,41 +1,49 @@
-# Despliegue en Vercel (K.ENGINE)
+# Despliegue Vercel + KERNEL
 
-## Qué se despliega
+## Qué hay en este deploy
 
-- **UI React + Vite** (`dist/`)
-- Inferencia **100 % en el navegador** (WebLLM + WebGPU)
-- **No** se ejecuta `server.js` en Vercel (la API HTTP es opcional y local/otro host)
+| Ruta | Comportamiento |
+|------|----------------|
+| `/` (UI) | SPA Vite: WebLLM/WebGPU en el **navegador** |
+| `GET /health` | API serverless → `{"status":"ok","engine":"K.ENGINE",...}` |
+| `GET /models` | Lista modelos + estado backends |
+| `POST /chat` | Solo si configuras **openai-compatible** (env) |
+| `/bridge/*` | **No** disponible en serverless (hace falta `server.js` persistente) |
 
-## Por qué no hay COEP / COOP estrictos
+## Por qué KERNEL decía «sin mecanismo compatible»
 
-`Cross-Origin-Embedder-Policy: require-corp` rompe la descarga de pesos desde Hugging Face
-(muchas respuestas no envían `Cross-Origin-Resource-Policy`). Por eso **no** se activa
-aislamiento cross-origin en `vercel.json`: la descarga de modelos y la Cache API de WebLLM
-fluyen sin bloqueos artificiales.
+La UI era pública, pero `/health` y `/models` devolvían `index.html` (rewrite SPA).
+KERNEL no veía API. Eso queda corregido con `api/*` + rewrites en `vercel.json`.
 
-El Service Worker (`public/sw.js`) **solo** cachea el app shell del mismo origen y **nunca**
-intercepta Hugging Face / GitHub / la API.
+## Variables de entorno (Vercel → Settings → Environment Variables)
 
-## Pasos en Vercel
+Opcionales; **no** las pongas en el frontend:
 
-1. Importar el repo `k-engine` desde GitHub.
-2. Framework: **Vite** (o dejar que lea `vercel.json`).
-3. Build: `npm run build` · Output: `dist` · Node.js: **20.x**.
-4. Deploy.
+| Variable | Uso |
+|----------|-----|
+| `KENGINE_BASE_URL` | p.ej. `https://api.openai.com/v1` u Ollama remoto |
+| `KENGINE_API_KEY` | Clave del proveedor |
+| `KENGINE_MODEL` | id del modelo |
+| `KENGINE_AUTH_TOKEN` | Si se define, KERNEL debe enviar `Authorization: Bearer …` |
+| `KENGINE_CORS_ORIGIN` | Orígenes KERNEL (o `*` en pruebas) |
+| `KENGINE_BACKEND` | `auto` \| `openai-compatible` \| `webllm` |
 
-URL resultante: `https://….vercel.app` (HTTPS → WebGPU OK).
+Sin `BASE_URL`+`MODEL`, `/chat` responde 503 con mensaje claro; `/health` y `/models` siguen OK para que KERNEL detecte el motor.
 
-## Uso en producción
+## WebLLM «de verdad» con KERNEL
 
-1. Chrome o Edge reciente.
-2. **INICIAR MOTOR** → comprobar WebGPU.
-3. Descargar un modelo del catálogo (primera vez: red a Hugging Face).
-4. Chat en Model Lab.
+El modelo local solo corre en una **pestaña**. El bridge SSE de `server.js` no cabe bien en Vercel serverless.
 
-Si un modelo falla al descargar: usa el panel **DIAGNOSTICAR RECURSOS** y, si hace falta,
-**FORMATEAR MODELO** en la tarjeta (borra solo ese modelo en Cache API, no toda la app).
+Opciones:
+1. **openai-compatible** en Vercel (env vars) → KERNEL usa `/chat`.
+2. Host Node con `npm start` (Railway/Render/VPS) → bridge + pestaña K.ENGINE abierta.
+3. Uso solo en navegador (sin KERNEL remoto) en la URL de Vercel.
 
-## API opcional
+## Comprobar tras el deploy
 
-Para `/health`, `/chat`, bridge con KERNEL, ejecuta `server.js` en otro host o en local
-(`npm run dev` / `npm start` tras `npm run build`).
+```bash
+curl -s https://TU-DOMINIO.vercel.app/health
+curl -s https://TU-DOMINIO.vercel.app/models
+```
+
+Debes ver JSON con `"engine":"K.ENGINE"`, no HTML.
