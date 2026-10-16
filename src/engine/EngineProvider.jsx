@@ -63,7 +63,7 @@ export function EngineProvider({ children }) {
   const [control, setControl] = useState(emptyControl);
   const [apiState, setApiState] = useState({ ok: false, version: null });
 
-  const keRef = useRef({ apiOk: false, cid: null, lastReported: "", job: null, diag: [], labGenId: null, started: false });
+  const keRef = useRef({ apiOk: false, cid: null, lastReported: "", job: null, diag: [], labGenId: null, started: false, bridgeRequestId: null });
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const mmRef = useRef(mm);
@@ -154,6 +154,16 @@ export function EngineProvider({ children }) {
           setMessages((prev) => {
             const next = prev.map((m) => (m.streaming ? { role: m.role, content: m.content } : m));
             if (mmRef.current.loadedId) saveChat(mmRef.current.loadedId, next);
+            const requestId = KE.bridgeRequestId;
+            if (requestId) {
+              KE.bridgeRequestId = null;
+              const answer = [...next].reverse().find((m) => m.role === "assistant")?.content || "";
+              try {
+                if (window.opener && !window.opener.closed) {
+                  window.opener.postMessage({ type: "KENGINE_RESPONSE", requestId, response: answer }, "https://project-kernel-release-0-6-0.lovable.app");
+                }
+              } catch { /* La ventana de KERNEL puede haberse cerrado. */ }
+            }
             return next;
           });
         } else if (d.type === "error" && d.scope === "generate") {
@@ -161,6 +171,15 @@ export function EngineProvider({ children }) {
           KE.labGenId = null;
           setLabError("Fallo en la generación: " + d.message);
           setMessages((prev) => prev.map((m) => (m.streaming ? { role: m.role, content: m.content } : m)));
+          const requestId = KE.bridgeRequestId;
+          if (requestId) {
+            KE.bridgeRequestId = null;
+            try {
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: "KENGINE_ERROR", requestId, error: String(d.message || "Fallo en la generación local") }, "https://project-kernel-release-0-6-0.lovable.app");
+              }
+            } catch { /* La ventana de KERNEL puede haberse cerrado. */ }
+          }
         }
       }),
     [],
@@ -180,6 +199,64 @@ export function EngineProvider({ children }) {
     modelManager.generate({ id: genId, model: id, messages: payload });
     return true;
   }, []);
+
+  // Puente seguro entre la ventana abierta por KERNEL y el modelo WebLLM local.
+  // No usa la API serverless para inferencia ni acepta mensajes de otros orígenes.
+  useEffect(() => {
+    const KERNEL_ORIGIN = "https://project-kernel-release-0-6-0.lovable.app";
+    const opener = window.opener;
+    if (!opener) return undefined;
+
+    const announce = () => {
+      try {
+        if (!opener.closed) {
+          opener.postMessage({
+            type: "KENGINE_BRIDGE_READY",
+            modelReady: Boolean(mmRef.current.loadedId) && mmRef.current.models[mmRef.current.loadedId]?.status === "READY",
+            model: mmRef.current.loadedId || null,
+          }, KERNEL_ORIGIN);
+        }
+      } catch { /* El opener puede haberse cerrado. */ }
+    };
+
+    const onMessage = (event) => {
+      if (event.origin !== KERNEL_ORIGIN || event.source !== window.opener) return;
+      const data = event.data;
+      if (!data || data.type !== "KERNEL_REQUEST") return;
+      const requestId = typeof data.requestId === "string" ? data.requestId.slice(0, 120) : "";
+      const prompt = typeof data.message === "string" ? data.message.trim() : "";
+      const replyError = (error, code) => {
+        try {
+          window.opener?.postMessage({ type: "KENGINE_ERROR", requestId, error, code }, KERNEL_ORIGIN);
+        } catch { /* El opener puede haberse cerrado. */ }
+      };
+      if (!requestId || !prompt || prompt.length > 8000) {
+        replyError("Solicitud vacía o demasiado larga (máximo 8000 caracteres).", "invalid_request");
+        return;
+      }
+      const current = mmRef.current;
+      const modelId = current.loadedId;
+      const status = modelId ? current.models[modelId]?.status : null;
+      if (status !== "READY") {
+        replyError("K.ENGINE no tiene un modelo local listo. Abre K.ENGINE, inicia el motor y carga uno de los cuatro modelos hasta READY.", "model_not_ready");
+        return;
+      }
+      if (keRef.current.bridgeRequestId || keRef.current.labGenId || keRef.current.job || generating) {
+        replyError("K.ENGINE está ocupado con otra generación.", "busy");
+        return;
+      }
+      keRef.current.bridgeRequestId = requestId;
+      const accepted = sendChat(prompt);
+      if (!accepted) {
+        keRef.current.bridgeRequestId = null;
+        replyError("No se pudo iniciar la inferencia local. Comprueba que el modelo siga en READY.", "generation_not_started");
+      }
+    };
+
+    window.addEventListener("message", onMessage);
+    announce();
+    return () => window.removeEventListener("message", onMessage);
+  }, [loadedId, loadedStatus, generating, sendChat]);
 
   const cancelGenerate = useCallback(() => modelManager.cancelGenerate(), []);
   const resetChat = useCallback(() => {
