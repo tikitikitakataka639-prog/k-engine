@@ -9,7 +9,8 @@
     { "source": "/models", "destination": "/api/models" },
     { "source": "/chat", "destination": "/api/chat" },
     { "source": "/config", "destination": "/api/config" },
-    { "source": "/bridge/(.*)", "destination": "/api/health" },
+    { "source": "/bridge", "destination": "/api/bridge" },
+    { "source": "/bridge/(.*)", "destination": "/api/bridge" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [
