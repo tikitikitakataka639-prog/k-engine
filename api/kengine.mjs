@@ -9,10 +9,12 @@
  * `node server.js` en un host persistente para el bridge completo.
  */
 
-import { KERNEL_PERSONALITY } from "../src/engine/personality.js";
+import { KERNEL_PERSONALITY, getSystemPrompt } from "../src/engine/personality.js";
 
 const VERSION = "1.3.0";
-const SYSTEM_PROMPT = KERNEL_PERSONALITY.systemPrompt;
+function systemPromptFor(c) {
+  return getSystemPrompt(c.model || "");
+}
 
 const WEBLLM_MODELS = [
   { id: "llama-3.2-1b", webllm_id: "Llama-3.2-1B-Instruct-q4f16_1-MLC" },
@@ -220,7 +222,7 @@ async function handleChat(req, res, c) {
   }
   const history = Array.isArray(body.history) ? body.history : [];
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPromptFor(c) },
     ...history
       .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       .slice(-12)
