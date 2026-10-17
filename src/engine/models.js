@@ -1,14 +1,28 @@
-// Catálogo de modelos DERIVADO de prebuiltAppConfig.model_list (@mlc-ai/web-llm instalado).
-// No hay lista duplicada de modelos: solo una lista de IDs "destacados" que se valida contra la real.
-// Si un ID destacado no existe en la versión instalada, se descarta (y se informa en `missingFeatured`).
+// Catálogo KERNEL: las fichas viven en modelRegistry.js (código permanente).
+// Las URLs/wasm reales las resuelve @mlc-ai/web-llm; nosotros filtramos a los 4 destacados.
 
-export const DEFAULT_MODEL_ID = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
-export const FEATURED_IDS = [
+import {
   DEFAULT_MODEL_ID,
-  "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
-  "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
-  "Llama-3.2-3B-Instruct-q4f16_1-MLC",
-];
+  KERNEL_MODEL_IDS,
+  KERNEL_MODELS,
+  buildKernelAppConfig,
+  getKernelModel,
+  isKernelModel,
+  lifecyclePhase,
+} from "./modelRegistry.js";
+
+export {
+  DEFAULT_MODEL_ID,
+  KERNEL_MODEL_IDS,
+  KERNEL_MODELS,
+  buildKernelAppConfig,
+  getKernelModel,
+  isKernelModel,
+  lifecyclePhase,
+};
+
+/** @deprecated usar KERNEL_MODEL_IDS */
+export const FEATURED_IDS = KERNEL_MODEL_IDS;
 
 let webllmPromise = null;
 /** Carga perezosa del paquete npm (solo se usa en el hilo principal para metadatos y gestión de caché). */
@@ -17,31 +31,54 @@ export function loadWebLLM() {
   return webllmPromise;
 }
 
-function describe(record) {
+function describe(record, kernelMeta) {
   const id = record.model_id;
   const features = record.required_features || [];
   const needsF16 = features.includes("shader-f16") || /q4f16|q0f16/.test(id);
-  const label = id.replace(/-MLC(-1k)?$/i, "").replace(/-Instruct/i, " Instruct").replace(/-q(\d)f(\d+)_(\d)/i, " · q$1f$2_$3");
+  const meta = kernelMeta || KERNEL_MODELS[id] || {};
+  const label =
+    meta.label ||
+    id.replace(/-MLC(-1k)?$/i, "").replace(/-Instruct/i, " Instruct").replace(/-q(\d)f(\d+)_(\d)/i, " · q$1f$2_$3");
   return {
     id,
     label,
     hf: String(record.model || "").replace("https://huggingface.co/", ""),
-    vramMB: record.vram_required_MB ?? null,
-    lowResource: record.low_resource_required ?? null,
-    contextWindow: record.overrides?.context_window_size ?? null,
+    vramMB: meta.vramMB ?? record.vram_required_MB ?? null,
+    lowResource: meta.lowResource ?? record.low_resource_required ?? null,
+    contextWindow: meta.contextWindow ?? record.overrides?.context_window_size ?? 4096,
     requiredFeatures: needsF16 ? Array.from(new Set([...features, "shader-f16"])) : features,
     isVision: Boolean(record.model_type === 2 || /vision|llava/i.test(id)),
-    featured: FEATURED_IDS.includes(id),
+    featured: isKernelModel(id),
+    personality: meta.personality || "small",
+    location: meta.location || { definition: "code", weights: "browser-cache" },
   };
 }
 
-/** @returns {Promise<{models: object[], featured: object[], missingFeatured: string[], version: string|null, total: number}>} */
+/**
+ * @returns {Promise<{
+ *   models: object[],
+ *   featured: object[],
+ *   missingFeatured: string[],
+ *   version: string|null,
+ *   total: number,
+ *   appConfig: object|null
+ * }>}
+ */
 export async function loadCatalog() {
   const webllm = await loadWebLLM();
-  const list = webllm.prebuiltAppConfig.model_list;
-  const byId = new Map(list.map((r) => [r.model_id, r]));
-  const featured = FEATURED_IDS.filter((id) => byId.has(id)).map((id) => describe(byId.get(id)));
-  const missingFeatured = FEATURED_IDS.filter((id) => !byId.has(id));
-  const models = list.map(describe);
-  return { models, featured, missingFeatured, version: webllm.version || null, total: list.length };
+  const { appConfig, missing, resolved } = buildKernelAppConfig(webllm.prebuiltAppConfig);
+
+  // Catálogo UI = solo modelos KERNEL resueltos (+ aviso de missing)
+  const featured = resolved.map((r) => describe(r, KERNEL_MODELS[r.model_id]));
+  // models = mismos destacados (K.ENGINE no expone el catálogo completo de WebLLM en la UI)
+  const models = featured.slice();
+
+  return {
+    models,
+    featured,
+    missingFeatured: missing,
+    version: webllm.version || null,
+    total: models.length,
+    appConfig,
+  };
 }
