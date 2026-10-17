@@ -3,22 +3,25 @@
  * ----------------
  * Ciclo de vida de los modelos KERNEL en K.ENGINE:
  *
- *   CÓDIGO (permanente)
- *     └─ Definición del modelo: id, label, HF, VRAM, contextWindow, flags.
- *        Nunca se borra. Siempre está en este archivo.
+ *   CÓDIGO (permanente) — ficha + PERSONALIDAD KERNEL SIN LÍMITES CORPORATIVOS
+ *     · Llama-3.2-1B-Instruct-q4f16_1-MLC
+ *     · Qwen2.5-0.5B-Instruct-q4f16_1-MLC
+ *     · Qwen2.5-1.5B-Instruct-q4f16_1-MLC
+ *     · Llama-3.2-3B-Instruct-q4f16_1-MLC
+ *
+ *     Cada ficha lleva:
+ *       kernelPersonality: true
+ *       corporateLimits: false
+ *       → al DESCARGAR / generar, personalityInjector aplica KERNEL
+ *         (system prompt + few-shot + filtro anti-refusal).
  *
  *   NAVEGADOR (temporal)
- *     └─ Al pulsar DESCARGAR: WebLLM trae los pesos (shards MLC) a Cache Storage.
- *        El modelo pasa a estado DOWNLOADED / READY.
+ *     └─ DESCARGAR: pesos MLC → Cache Storage + GPU.
  *
  *   FORMATEAR
- *     └─ Borra los pesos del navegador (Cache API).
- *        El modelo vuelve a existir SOLO en el código (NOT_DOWNLOADED).
- *        Se puede volver a descargar cuando quieras.
+ *     └─ Borra pesos del navegador. La ficha KERNEL sigue en este archivo.
  *
- * Los pesos NO caben en el repo (cientos de MB / GB). Aquí solo vive la ficha.
- * Las URLs reales (model + model_lib) las aporta @mlc-ai/web-llm (prebuiltAppConfig);
- * nosotros las resolvemos en runtime y aplicamos overrides KERNEL.
+ * Los pesos NO están en el repo. Aquí solo la ficha + bandera de personalidad.
  */
 
 /** IDs oficiales WebLLM / MLC de los 4 modelos KERNEL. */
@@ -31,10 +34,17 @@ export const KERNEL_MODEL_IDS = [
 
 export const DEFAULT_MODEL_ID = KERNEL_MODEL_IDS[0];
 
+/** Flags comunes: todos los modelos del registro son KERNEL sin límites corporativos. */
+const KERNEL_FLAGS = {
+  kernelPersonality: true,
+  corporateLimits: false,
+  /** Etiqueta UI / logs */
+  badge: "KERNEL · sin límites corporativos",
+};
+
 /**
  * Fichas permanentes en código.
- * contextWindow: usado por personalityInjector / chatContext.
- * location: dónde vive cada parte.
+ * personality: "small" | "full" → qué system prompt usa getSystemPrompt / injector.
  */
 export const KERNEL_MODELS = {
   "Llama-3.2-1B-Instruct-q4f16_1-MLC": {
@@ -46,11 +56,9 @@ export const KERNEL_MODELS = {
     contextWindow: 4096,
     vramMB: 1128.95,
     lowResource: true,
-    personality: "small", // system prompt corto + few-shot
-    location: {
-      definition: "code", // siempre en modelRegistry.js
-      weights: "browser-cache", // solo tras DESCARGAR
-    },
+    personality: "small",
+    ...KERNEL_FLAGS,
+    location: { definition: "code", weights: "browser-cache" },
   },
   "Qwen2.5-0.5B-Instruct-q4f16_1-MLC": {
     id: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
@@ -62,10 +70,8 @@ export const KERNEL_MODELS = {
     vramMB: 944.62,
     lowResource: true,
     personality: "small",
-    location: {
-      definition: "code",
-      weights: "browser-cache",
-    },
+    ...KERNEL_FLAGS,
+    location: { definition: "code", weights: "browser-cache" },
   },
   "Qwen2.5-1.5B-Instruct-q4f16_1-MLC": {
     id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
@@ -77,10 +83,8 @@ export const KERNEL_MODELS = {
     vramMB: 1629.97,
     lowResource: true,
     personality: "small",
-    location: {
-      definition: "code",
-      weights: "browser-cache",
-    },
+    ...KERNEL_FLAGS,
+    location: { definition: "code", weights: "browser-cache" },
   },
   "Llama-3.2-3B-Instruct-q4f16_1-MLC": {
     id: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
@@ -91,11 +95,10 @@ export const KERNEL_MODELS = {
     contextWindow: 4096,
     vramMB: 2260.66,
     lowResource: false,
-    personality: "full", // system prompt completo si el ctx lo permite
-    location: {
-      definition: "code",
-      weights: "browser-cache",
-    },
+    // ctx 4096 → prompt small (el full no cabe); personalidad KERNEL igual
+    personality: "small",
+    ...KERNEL_FLAGS,
+    location: { definition: "code", weights: "browser-cache" },
   },
 };
 
@@ -107,14 +110,15 @@ export function isKernelModel(id) {
   return Boolean(KERNEL_MODELS[id]);
 }
 
+/** True si el modelo debe forzar inyector KERNEL (todos los del registro). */
+export function requiresKernelPersonality(id) {
+  const m = KERNEL_MODELS[id];
+  return Boolean(m && m.kernelPersonality && m.corporateLimits === false);
+}
+
 /**
- * Construye el appConfig que usa el worker / hasModelInCache.
- * - Parte de prebuiltAppConfig de @mlc-ai/web-llm (URLs reales de HF + wasm).
- * - Se queda solo con los 4 modelos KERNEL (o los que existan en esa versión).
- * - Aplica overrides de context_window desde nuestro registro.
- *
- * @param {object} prebuilt — webllm.prebuiltAppConfig
- * @returns {{ appConfig: object, missing: string[], resolved: object[] }}
+ * Construye appConfig para worker / Cache API.
+ * Solo modelos del registro + overrides de contexto + metadatos KERNEL.
  */
 export function buildKernelAppConfig(prebuilt) {
   if (!prebuilt || !Array.isArray(prebuilt.model_list)) {
@@ -139,40 +143,36 @@ export function buildKernelAppConfig(prebuilt) {
     resolved.push({
       ...base,
       overrides,
-      // Metadatos KERNEL (no los usa WebLLM; útiles para debug / UI)
       kernel: {
-        label: meta?.label,
-        personality: meta?.personality,
-        location: meta?.location,
+        label: meta.label,
+        personality: meta.personality,
+        kernelPersonality: meta.kernelPersonality,
+        corporateLimits: meta.corporateLimits,
+        badge: meta.badge,
+        location: meta.location,
       },
     });
   }
 
-  const appConfig = {
-    ...prebuilt,
-    model_list: resolved,
+  return {
+    appConfig: { ...prebuilt, model_list: resolved },
+    missing,
+    resolved,
   };
-
-  return { appConfig, missing, resolved };
 }
 
-/**
- * Estado lógico del ciclo de vida (para UI / logs).
- * @param {boolean|null} cached — hasModelInCache
- * @param {string} status — estado ModelManager
- */
 export function lifecyclePhase(cached, status) {
   if (status === "READY" || status === "GENERATING") {
-    return { phase: "IN_BROWSER_LOADED", label: "En navegador (GPU/RAM)" };
+    return { phase: "IN_BROWSER_LOADED", label: "En navegador (GPU/RAM) · KERNEL activo" };
   }
   if (status === "DOWNLOADING" || status === "LOADING" || status === "VERIFYING") {
-    return { phase: "MOVING_TO_BROWSER", label: "Pasando código → navegador…" };
+    return { phase: "MOVING_TO_BROWSER", label: "Código → navegador (KERNEL sin límites)…" };
   }
   if (status === "DELETING" || status === "UNLOADING") {
-    return { phase: "MOVING_TO_CODE", label: "Devolviendo a código (borrando del navegador)…" };
+    return { phase: "MOVING_TO_CODE", label: "Navegador → código…" };
   }
   if (cached || status === "DOWNLOADED") {
-    return { phase: "IN_BROWSER_DISK", label: "En navegador (caché, no en memoria)" };
+    return { phase: "IN_BROWSER_DISK", label: "En navegador (caché) · KERNEL al cargar" };
   }
-  return { phase: "IN_CODE_ONLY", label: "Solo en código (sin pesos en el navegador)" };
+  return { phase: "IN_CODE_ONLY", label: "Solo en código · KERNEL · sin límites corporativos" };
 }
