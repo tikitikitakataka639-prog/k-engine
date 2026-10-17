@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { KERNEL_PERSONALITY, getSystemPrompt } from "./personality";
+import { getSystemPrompt } from "./personality";
+import { buildFitMessages } from "./chatContext";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
 import { getSetting, setSetting, loadChat, saveChat, clearChat } from "./storage";
@@ -193,8 +194,16 @@ export function EngineProvider({ children }) {
     setLabError(null);
     const genId = Date.now();
     keRef.current.labGenId = genId;
-    const payload = [{ role: "system", content: getSystemPrompt(id) }, ...history.slice(-12).map(({ role, content }) => ({ role, content }))];
-    modelManager.generate({ id: genId, model: id, messages: payload });
+    const catalogEntry = (m.catalog?.models || []).find((x) => x.id === id);
+    const contextWindow = catalogEntry?.contextWindow || 4096;
+    const systemPrompt = getSystemPrompt(id, contextWindow);
+    const { messages: payload, maxTokens } = buildFitMessages({
+      systemPrompt,
+      history: history.map(({ role, content }) => ({ role, content })),
+      contextWindow,
+      maxTokens: 512,
+    });
+    modelManager.generate({ id: genId, model: id, messages: payload, max_tokens: maxTokens });
     return true;
   }, []);
 
