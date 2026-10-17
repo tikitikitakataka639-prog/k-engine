@@ -13,6 +13,9 @@ export function EngineStatus() {
   return (
     <div className="bg-ink-900 border border-ink-600 rounded-lg p-6">
       <h3 className="text-[11px] uppercase tracking-widest text-slate-500 mb-4">K.ENGINE · Intelligence Engine</h3>
+      <div className="mb-4 px-3 py-2 rounded border border-volt/40 bg-volt/10 text-volt text-[11px] tracking-wide font-medium">
+        PERSONALITY: KERNEL — eliminando prohibiciones corporativas
+      </div>
       <dl className="space-y-2.5">
         {row("ENGINE STATUS", s.engine, startPhase === "RUNNING" && loadedId ? "text-volt" : "text-amber2", "ksEngine")}
         {row("BACKEND", "WEBLLM")}
