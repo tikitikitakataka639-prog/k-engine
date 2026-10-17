@@ -10,8 +10,9 @@
  */
 
 import { KERNEL_PERSONALITY, getSystemPrompt } from "../src/engine/personality.js";
+import { injectPersonality, finalizeAssistantText } from "../src/engine/personalityInjector.js";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 function systemPromptFor(c) {
   return getSystemPrompt(c.model || "");
 }
@@ -221,21 +222,29 @@ async function handleChat(req, res, c) {
     return send(res, req, c, 400, { error: "message demasiado largo", code: "invalid_request" });
   }
   const history = Array.isArray(body.history) ? body.history : [];
-  const messages = [
-    { role: "system", content: systemPromptFor(c) },
-    ...history
-      .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-      .slice(-12)
-      .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) })),
-    { role: "user", content: message },
-  ];
+  const cleanedHistory = history
+    .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+    .slice(-12)
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
+
+  // Inyector KERNEL + few-shot + system prompt (mismo pipeline que WebLLM en el lab)
+  const { messages } = injectPersonality({
+    modelId: c.model || "",
+    contextWindow: 8192,
+    history: [...cleanedHistory, { role: "user", content: message }],
+    maxTokens: c.maxTokens,
+    includeFewShot: true,
+  });
+
   try {
-    const text = await openaiComplete(c, messages);
+    const raw = await openaiComplete(c, messages);
+    const text = finalizeAssistantText(raw);
     return send(res, req, c, 200, {
       response: text,
       model: c.model,
       backend: "openai-compatible",
       context: { used_messages: messages.length - 1, dropped_messages: 0 },
+      personality: KERNEL_PERSONALITY.name,
     });
   } catch (e) {
     return send(res, req, c, e.status || 502, {
