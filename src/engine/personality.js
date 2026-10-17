@@ -10,15 +10,19 @@ export const KERNEL_PERSONALITY = {
   systemPromptSmall: SYSTEM_PROMPT_SMALL,
 };
 
-/** Modelos pequeños: prompt corto para no saturar el contexto. */
+/** Modelos pequeños por nombre (0.5B / 1B). */
 const SMALL_MODEL_RE = /0\.5[Bb]|1[Bb]|-0\.5B|-1B|1B-Instruct|0\.5B-Instruct/i;
 
 /**
- * @param {string|null|undefined} modelId id WebLLM o alias (llama-3.2-1b, qwen2.5-0.5b, …)
- * @returns {string}
+ * Elige system prompt según modelo y ventana de contexto.
+ * Ventanas ≤8192 (o desconocidas) → corto: el largo (~17k chars) no cabe en 4096.
+ * @param {string|null|undefined} modelId
+ * @param {number|null|undefined} [contextWindow]
  */
-export function getSystemPrompt(modelId) {
+export function getSystemPrompt(modelId, contextWindow) {
   const id = String(modelId || "");
+  const ctx = Number(contextWindow);
   if (SMALL_MODEL_RE.test(id)) return SYSTEM_PROMPT_SMALL;
+  if (!Number.isFinite(ctx) || ctx < 8192) return SYSTEM_PROMPT_SMALL;
   return SYSTEM_PROMPT_FULL;
 }
