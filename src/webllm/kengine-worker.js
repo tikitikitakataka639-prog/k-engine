@@ -1,25 +1,24 @@
 // Worker de K.ENGINE: aquí vive WebLLM (dependencia npm empaquetada por Vite; sin CDN).
 // Flujo: main → EngineProvider → ModelManager → este Worker → @mlc-ai/web-llm → WebGPU.
+//
+// Ciclo de vida de modelos:
+//   CÓDIGO (modelRegistry) → DESCARGAR → Cache del navegador → FORMATEAR → solo código de nuevo.
 import { prebuiltAppConfig, CreateMLCEngine } from "@mlc-ai/web-llm";
+import { buildKernelAppConfig, KERNEL_MODEL_IDS } from "../engine/modelRegistry.js";
 
 let engine = null;
 let loadedModel = null;
 let generating = false;
 let loading = false;
 
+// AppConfig KERNEL: solo los 4 modelos del registro + overrides de contexto.
+const { appConfig: KERNEL_APP_CONFIG, missing: KERNEL_MISSING } = buildKernelAppConfig(prebuiltAppConfig);
+if (KERNEL_MISSING.length) {
+  console.warn("[K.ENGINE] Modelos del registro no encontrados en esta versión de WebLLM:", KERNEL_MISSING);
+}
+
 // ---------------------------------------------------------------------------
 // Interceptores de Cache API (add + put) para WebLLM 0.2.79
-//
-// Causa raíz: ArtifactCache de @mlc-ai/web-llm usa exclusivamente cache.add(request).
-// Cache.add = fetch + put. Interceptar solo put NO cubre:
-//   - "Failed to execute 'add' on 'Cache': network error" (fallo en el fetch interno)
-//   - errores de add que el navegador reporta antes/después del put
-// put sigue fallando a veces con "Unexpected internal error" (Chrome + shards grandes).
-//
-// Estrategia:
-//   1) Reimplementar add de forma controlada: match → fetch con reintentos → put
-//   2) Mantener el interceptor de put (escritura) con reintentos y diagnóstico
-//   3) No borrar cachés ajenas; no fingir éxito; respetar AbortSignal
 // ---------------------------------------------------------------------------
 const MAX_CACHE_RETRIES = 4;
 const CACHE_BACKOFF_MS = [400, 1200, 3000, 6000];
@@ -51,7 +50,6 @@ function requestUrl(request) {
   return typeof request === "string" ? request : request?.url || String(request);
 }
 
-/** Errores de escritura en Cache Storage (put) potencialmente recuperables. */
 function isTransientStorageError(err) {
   const msg = String((err && err.message) || err || "").toLowerCase();
   return (
@@ -63,11 +61,10 @@ function isTransientStorageError(err) {
   );
 }
 
-/** Errores de red / fetch potencialmente recuperables (fase de Cache.add). */
 function isTransientNetworkError(err) {
   const msg = String((err && err.message) || err || "").toLowerCase();
   const name = String((err && err.name) || "").toLowerCase();
-  if (name === "aborterror") return false; // cancelación explícita: no reintentar
+  if (name === "aborterror") return false;
   return (
     msg.includes("network error") ||
     msg.includes("failed to fetch") ||
@@ -78,28 +75,18 @@ function isTransientNetworkError(err) {
     msg.includes("timeout") ||
     msg.includes("econnreset") ||
     msg.includes("econnrefused") ||
-    name === "typeerror" && (msg.includes("network") || msg.includes("fetch"))
+    (name === "typeerror" && (msg.includes("network") || msg.includes("fetch")))
   );
-}
-
-function isTransientCacheError(err) {
-  return isTransientStorageError(err) || isTransientNetworkError(err);
 }
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * Fetch con reintentos limitados para errores de red transitorios.
- * No reintenta 4xx/5xx definitivos ni AbortError.
- * Devuelve Response solo si status OK (o 0 opaque); nunca almacena fallos HTTP.
- */
 async function fetchWithNetworkRetries(request, url) {
   let lastError = null;
   for (let attempt = 1; attempt <= MAX_CACHE_RETRIES; attempt++) {
     try {
-      // Reconstruir Request para cada intento (body/stream no reutilizable).
       const req =
         typeof request === "string"
           ? new Request(request)
@@ -108,7 +95,7 @@ async function fetchWithNetworkRetries(request, url) {
               headers: request.headers,
               mode: request.mode,
               credentials: request.credentials,
-              cache: "no-store", // evitar que el HTTP cache del navegador oculte fallos
+              cache: "no-store",
               redirect: request.redirect,
               referrer: request.referrer,
               integrity: request.integrity,
@@ -126,17 +113,9 @@ async function fetchWithNetworkRetries(request, url) {
       const response = await fetch(req);
 
       if (!response.ok && response.status !== 0) {
-        // HTTP definitivo: no reintentar (evita guardar 404/403 como válido).
         const msg = `[K.ENGINE] Cache.add: HTTP ${response.status} definitivo. URL: ${url}`;
         self.postMessage({ type: "cache_diag", phase: "CACHE_ADD_HTTP_FAIL", url, status: response.status, message: msg });
         throw new Error(msg);
-      }
-
-      const contentLength = getContentLength(response);
-      // Respuesta vacía con Content-Length > 0 → descarga interrumpida / incompleta.
-      if (contentLength != null && contentLength > 0) {
-        // No leemos el body aquí (costoso y consumiría el stream). Se confía en put + clone.
-        // Si el body llega truncado, put o el uso posterior fallará de forma visible.
       }
 
       return response;
@@ -169,10 +148,6 @@ async function fetchWithNetworkRetries(request, url) {
   throw lastError || new Error("[K.ENGINE] Cache.add fetch falló tras reintentos.");
 }
 
-/**
- * Parche de Cache.prototype.put y Cache.prototype.add. Idempotente.
- * WebLLM 0.2.79 ArtifactCache.addToCache → cache.add(request).
- */
 function installCacheInterceptors() {
   if (self.__KENGINE_CACHE_INTERCEPTORS__) return;
   if (typeof Cache === "undefined" || !Cache.prototype) return;
@@ -182,7 +157,6 @@ function installCacheInterceptors() {
   const originalAdd = Cache.prototype.add;
   const originalMatch = Cache.prototype.match;
 
-  // --- put: reintentos de escritura + diagnóstico (conserva lógica previa) ---
   Cache.prototype.put = async function patchedPut(request, response) {
     const url = requestUrl(request);
     const contentLength = getContentLength(response);
@@ -261,7 +235,6 @@ function installCacheInterceptors() {
     throw lastError || new Error("[K.ENGINE] Cache.put falló tras reintentos.");
   };
 
-  // --- add: controla fetch + put (punto real de fallo de WebLLM) ---
   Cache.prototype.add = async function patchedAdd(request) {
     const url = requestUrl(request);
     const est = await storageEstimate();
@@ -273,7 +246,6 @@ function installCacheInterceptors() {
       storage: est,
     });
 
-    // Si ya está en caché, no volver a descargar (evita re-descargas innecesarias).
     try {
       const existing = await originalMatch.call(this, request);
       if (existing) {
@@ -284,11 +256,7 @@ function installCacheInterceptors() {
       /* match falló: continuar con descarga */
     }
 
-    // Fetch con reintentos de red.
     const response = await fetchWithNetworkRetries(request, url);
-
-    // Escritura vía put parcheado (reintentos de almacenamiento).
-    // Usamos this.put (ya parcheado) para no saltarnos el diagnóstico de put.
     await this.put(request, response);
 
     self.postMessage({
@@ -300,7 +268,6 @@ function installCacheInterceptors() {
     });
   };
 
-  // addAll: secuencial para no saturar red/cuota; cada ítem usa add parcheado.
   if (typeof Cache.prototype.addAll === "function") {
     Cache.prototype.addAll = async function patchedAddAll(requests) {
       const list = Array.from(requests || []);
@@ -310,27 +277,32 @@ function installCacheInterceptors() {
     };
   }
 
-  // Conservar referencia por si hace falta depuración.
   self.__KENGINE_ORIGINAL_CACHE_PUT__ = originalPut;
   self.__KENGINE_ORIGINAL_CACHE_ADD__ = originalAdd;
 }
 
-// Instalar antes de cualquier llamada a CreateMLCEngine / fetch de WebLLM.
 installCacheInterceptors();
 
-const MODEL_LIST = prebuiltAppConfig.model_list;
+const MODEL_LIST = KERNEL_APP_CONFIG.model_list;
 const AVAILABLE_IDS = MODEL_LIST.map((m) => m.model_id);
 
-/** Fuente única de verdad: prebuiltAppConfig.model_list. Nunca se carga un ID que no esté ahí. */
+/** Solo modelos del registro KERNEL (código). */
 function getWebLLMModel(modelId) {
   const model = MODEL_LIST.find((item) => item.model_id === modelId) || null;
   if (!model) {
-    throw new Error("Modelo no disponible en esta versión de WebLLM: " + modelId + " (" + AVAILABLE_IDS.length + " modelos conocidos).");
+    throw new Error(
+      "Modelo no está en el registro KERNEL: " +
+        modelId +
+        ". Disponibles en código: " +
+        KERNEL_MODEL_IDS.join(", ") +
+        " (resueltos en esta build: " +
+        AVAILABLE_IDS.join(", ") +
+        ").",
+    );
   }
   return model;
 }
 
-/** Fase real según el texto que emite WebLLM en initProgressCallback. */
 function phaseOf(p) {
   const t = (p.text || "").toLowerCase();
   if (t.includes("fetching")) return "DOWNLOADING";
@@ -342,6 +314,7 @@ self.onmessage = async (e) => {
   const msg = e.data;
   try {
     if (msg.type === "load") {
+      // DESCARGAR / CARGAR: definición en código → pesos al navegador
       let record;
       try {
         record = getWebLLMModel(msg.model);
@@ -376,7 +349,7 @@ self.onmessage = async (e) => {
         self.postMessage({ type: "status", value: "DOWNLOADING" });
         try {
           engine = await CreateMLCEngine(record.model_id, {
-            appConfig: prebuiltAppConfig,
+            appConfig: KERNEL_APP_CONFIG,
             initProgressCallback: (p) => {
               self.postMessage({ type: "progress", progress: p.progress || 0, text: p.text || "", phase: phaseOf(p) });
             },
@@ -392,7 +365,6 @@ self.onmessage = async (e) => {
           return;
         }
         loadedModel = msg.model;
-        // Verificación real: una generación mínima antes de declarar READY.
         self.postMessage({ type: "status", value: "VERIFYING" });
         const t0 = performance.now();
         const out = await engine.chat.completions.create({
@@ -475,6 +447,7 @@ self.onmessage = async (e) => {
     } else if (msg.type === "cancel") {
       if (engine) engine.interruptGenerate();
     } else if (msg.type === "unload") {
+      // Liberar GPU/RAM; los pesos pueden seguir en Cache Storage del navegador.
       if (generating) {
         self.postMessage({ type: "error", scope: "unload", message: "No se puede descargar de memoria durante la generación." });
         return;
