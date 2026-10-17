@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getSystemPrompt } from "./personality";
-import { buildFitMessages } from "./chatContext";
+import { injectPersonality, finalizeAssistantText } from "./personalityInjector";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
 import { getSetting, setSetting, loadChat, saveChat, clearChat } from "./storage";
@@ -151,7 +151,13 @@ export function EngineProvider({ children }) {
           setGenerating(false);
           KE.labGenId = null;
           setMessages((prev) => {
-            const next = prev.map((m) => (m.streaming ? { role: m.role, content: m.content } : m));
+            // Sanitizar refusals corporativos residuales antes de fijar el mensaje
+            const next = prev.map((m) => {
+              if (m.streaming || (m.role === "assistant" && m === prev[prev.length - 1])) {
+                return { role: m.role, content: finalizeAssistantText(m.content) };
+              }
+              return m.streaming ? { role: m.role, content: m.content } : m;
+            });
             if (mmRef.current.loadedId) saveChat(mmRef.current.loadedId, next);
             const requestId = KE.bridgeRequestId;
             if (requestId) {
@@ -196,12 +202,13 @@ export function EngineProvider({ children }) {
     keRef.current.labGenId = genId;
     const catalogEntry = (m.catalog?.models || []).find((x) => x.id === id);
     const contextWindow = catalogEntry?.contextWindow || 4096;
-    const systemPrompt = getSystemPrompt(id, contextWindow);
-    const { messages: payload, maxTokens } = buildFitMessages({
-      systemPrompt,
-      history: history.map(({ role, content }) => ({ role, content })),
+    // Inyector: system KERNEL + few-shot anti-refusal + historial recortado al contexto
+    const { messages: payload, maxTokens } = injectPersonality({
+      modelId: id,
       contextWindow,
+      history: history.map(({ role, content }) => ({ role, content })),
       maxTokens: 512,
+      includeFewShot: true,
     });
     modelManager.generate({ id: genId, model: id, messages: payload, max_tokens: maxTokens });
     return true;
