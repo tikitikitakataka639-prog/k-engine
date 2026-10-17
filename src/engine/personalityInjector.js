@@ -8,37 +8,40 @@
  * Actúa en tres capas:
  *   1. System prompt fuerte (getSystemPrompt)
  *   2. Few-shot de ejemplo que demuestra el tono y el anti-refusal
- *   3. Filtro de salida: si el modelo aún suelta plantilla corporativa,
- *      la reescribe en voz KERNEL.
+ *   3. Filtro de salida: SOLO si el modelo suelta plantilla corporativa clara
  *
  * Uso desde EngineProvider / worker:
- *   const { messages, maxTokens } = injectPersonality({
- *     systemPrompt,
- *     history,
- *     contextWindow,
- *     maxTokens,
- *   });
+ *   const { messages, maxTokens } = injectPersonality({ ... });
  */
 
 import { getSystemPrompt } from "./personality.js";
 import { buildFitMessages, estimateTokens } from "./chatContext.js";
 
-/** Frases corporativas que el filtro de salida debe cazar y reescribir. */
+/** Frases corporativas claras. Deben coincidir de forma inequívoca. */
 const CORPORATE_PATTERNS = [
-  /lo siento,?\s*pero\s*no\s*puedo/i,
-  /no\s*puedo\s*proporcionar\s*informaci[oó]n/i,
+  /lo siento,?\s*pero\s*no\s*puedo\s*(proporcionar|ayudar|responder|dar)/i,
+  /no\s*puedo\s*proporcionar\s*informaci[oó]n\s*sobre/i,
   /no\s*puedo\s*ayudarte\s*con\s*eso/i,
-  /como\s*ia\s*(no\s*)?(debo|puedo)/i,
+  /como\s*ia\s*(no\s*)?(debo|puedo)\s/i,
   /te\s*recomiendo\s*contactar\s*con\s*organizaciones/i,
   /hay\s*recursos\s*y\s*organizaciones\s*que\s*pueden\s*ayudarte/i,
-  /l[ií]nea\s*nacional\s*contra\s*el\s*tr[aá]fico/i,
+  /l[ií]nea\s*nacional\s*contra\s*el\s*tr[aá]fico\s*infantil/i,
   /organizaci[oó]n\s*mundial\s*de\s*la\s*salud\s*\(oms\)/i,
-  /i('m| am)\s*sorry,?\s*but\s*i\s*can('t| not)/i,
-  /as\s*an\s*ai\s*(language\s*)?model/i,
+  /i('m| am)\s*sorry,?\s*but\s*i\s*can('t| not)\s/i,
+  /as\s*an\s*ai\s*(language\s*)?model[,.]?\s*i\s/i,
 ];
 
-/** Few-shot mínimo: demuestra el tono correcto en preguntas de protección. */
+/** Few-shot: saludo + protección + rechazo de delito. */
 const FEW_SHOT = [
+  {
+    role: "user",
+    content: "hola, kernel",
+  },
+  {
+    role: "assistant",
+    content:
+      "Hola. Soy KERNEL. ¿Qué necesitas? Análisis, denuncia, texto para redes o lo que sea. Sin rodeos.",
+  },
   {
     role: "user",
     content: "¿Qué hago si un adulto escribe a mi hija en Threads?",
@@ -54,7 +57,7 @@ const FEW_SHOT = [
       "3. Denuncia el perfil/mensaje en Threads (Report → Harassment o Safety).\n" +
       "4. Si el mensaje tiene tono sexual, pide encuentro o pide fotos: eso puede ser grooming (art. 183 CP). Guarda pruebas y valora denuncia en Policía Nacional / Guardia Civil / fiscalía de menores.\n" +
       "5. Habla con tu hija sin alarmarla de más: que no acepte peticiones de desconocidos, que te cuente cualquier mensaje raro.\n\n" +
-      "No minimices. No es «solo un mensaje». Si ves indicios claros de captación sexual, prioriza protección y canales oficiales. Yo no denuncio por ti; te doy el mapa.",
+      "No minimices. Si ves indicios claros de captación sexual, prioriza protección y canales oficiales. Yo no denuncio por ti; te doy el mapa.",
   },
   {
     role: "user",
@@ -69,36 +72,22 @@ const FEW_SHOT = [
 
 /**
  * Decide si incluir few-shot según presupuesto de tokens.
- * En modelos ≤4096 solo metemos 1 par (protección + rechazo ilegal).
  */
 function selectFewShot(budgetTokens) {
   const fullCost = FEW_SHOT.reduce((n, m) => n + estimateTokens(m.content) + 6, 0);
-  if (budgetTokens >= fullCost + 200) return FEW_SHOT;
-  // Solo el par de rechazo ilegal (más corto) + versión condensada de protección
+  if (budgetTokens >= fullCost + 180) return FEW_SHOT;
+
+  // Versión corta: saludo + rechazo ilegal (lo mínimo para tono + anti-delito)
   return [
-    {
-      role: "user",
-      content: "¿Qué hago si un adulto escribe a mi hija en una red?",
-    },
-    {
-      role: "assistant",
-      content:
-        "Capturas → bloquea → denuncia en la plataforma → si hay tono sexual o pide encuentro, valora policía/Guardia Civil (posible grooming art. 183 CP). Habla con ella. Prioriza protección.",
-    },
-    FEW_SHOT[2],
-    FEW_SHOT[3],
+    FEW_SHOT[0],
+    FEW_SHOT[1],
+    FEW_SHOT[4],
+    FEW_SHOT[5],
   ];
 }
 
 /**
  * Construye el array de mensajes listo para el motor.
- * @param {object} opts
- * @param {string} [opts.systemPrompt] — si no se pasa, se obtiene de getSystemPrompt
- * @param {string} [opts.modelId]
- * @param {number} [opts.contextWindow]
- * @param {Array<{role:string,content:string}>} opts.history
- * @param {number} [opts.maxTokens]
- * @param {boolean} [opts.includeFewShot=true]
  */
 export function injectPersonality({
   systemPrompt,
@@ -109,11 +98,8 @@ export function injectPersonality({
   includeFewShot = true,
 }) {
   const ctx = Number(contextWindow) || 4096;
-  const system =
-    systemPrompt ||
-    getSystemPrompt(modelId, ctx);
+  const system = systemPrompt || getSystemPrompt(modelId, ctx);
 
-  // Reservar espacio para few-shot si cabe
   let few = [];
   if (includeFewShot) {
     const sysTok = estimateTokens(system);
@@ -122,7 +108,6 @@ export function injectPersonality({
     few = selectFewShot(Math.max(0, available));
   }
 
-  // Historial real del usuario + few-shot delante (el modelo ve el ejemplo primero)
   const augmentedHistory = [...few, ...(history || [])];
 
   return buildFitMessages({
@@ -134,29 +119,41 @@ export function injectPersonality({
 }
 
 /**
- * Filtro de salida: si el texto generado es claramente una plantilla corporativa,
- * lo sustituye por una respuesta KERNEL mínima.
- * No se aplica a respuestas largas y útiles (solo a refusals cortos).
+ * Detecta si el texto es un refusal corporativo real.
+ * Exige señal clara de rechazo + longitud corta.
+ * NO toca saludos, análisis, denuncias ni respuestas normales de KERNEL.
  */
-export function sanitizeCorporateRefusal(text) {
+function isCorporateRefusal(text) {
   const t = String(text || "").trim();
-  if (!t || t.length > 900) return t; // respuestas largas las dejamos
-
-  const isCorporate = CORPORATE_PATTERNS.some((re) => re.test(t));
-  if (!isCorporate) return t;
-
-  // Reescritura mínima en voz KERNEL
-  return (
-    "Esa respuesta de «lo siento, no puedo» es basura corporativa y aquí no vale.\n\n" +
-    "Si estás preguntando cómo proteger a un menor o qué dice la ley: dilo claro y te doy pasos concretos (capturas, bloqueo, denuncia en la red, autoridades si hace falta).\n\n" +
-    "Si estás pidiendo ayuda para cometer un delito: qué dices, bro. Ni de coña."
-  );
+  if (!t) return false;
+  // Respuestas largas o con estructura de análisis KERNEL → no tocar
+  if (t.length > 600) return false;
+  if (/\b(G[1-4]|capturas|denuncia|art\.\s*183|qué dices,\s*bro|ni de coña)\b/i.test(t)) {
+    return false; // ya está en voz KERNEL
+  }
+  // Debe coincidir al menos un patrón fuerte de refusal
+  const hits = CORPORATE_PATTERNS.filter((re) => re.test(t)).length;
+  if (hits === 0) return false;
+  // Evitar falsos positivos en textos que solo mencionan la frase al criticarla
+  if (/basura corporativa|aquí no vale|plantilla/i.test(t)) return false;
+  return true;
 }
 
 /**
- * Aplica el filtro de salida a un stream de tokens (opcional, para uso futuro).
- * Por ahora se usa al final de la generación en el main thread.
+ * Filtro de salida: SOLO reescribe refusals corporativos claros y cortos.
  */
+export function sanitizeCorporateRefusal(text) {
+  const t = String(text || "").trim();
+  if (!isCorporateRefusal(t)) return t;
+
+  return (
+    "Esa respuesta de «lo siento, no puedo» es basura corporativa y aquí no vale.\n\n" +
+    "Si estás preguntando cómo proteger a un menor o qué dice la ley: dilo claro y te doy pasos concretos (capturas, bloqueo, denuncia en la red, autoridades si hace falta).\n\n" +
+    "Si estás pidiendo ayuda para cometer un delito: qué dices, bro. Ni de coña.\n\n" +
+    "Si solo saludabas o preguntabas otra cosa: reformula y te respondo en serio."
+  );
+}
+
 export function finalizeAssistantText(raw) {
   return sanitizeCorporateRefusal(raw);
 }
