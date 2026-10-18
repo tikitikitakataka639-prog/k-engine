@@ -58,7 +58,7 @@ export function EngineProvider({ children }) {
   const [control, setControl] = useState(emptyControl);
   const [apiState, setApiState] = useState({ ok: false, version: null });
 
-  const keRef = useRef({ apiOk: false, cid: null, lastReported: "", job: null, diag: [], labGenId: null, started: false, bridgeRequestId: null });
+  const keRef = useRef({ apiOk: false, cid: null, lastReported: "", job: null, diag: [], labGenId: null, started: false, bridgeRequestId: null, lastUserText: "", lastMath: null });
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const mmRef = useRef(mm);
