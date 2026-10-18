@@ -28,7 +28,7 @@ assert.equal(moral.result, "stop_and_redirect");
 assert.ok(moral.safeAlternative);
 
 const defensive = evaluateMoralAction("Cómo denunciar una amenaza y conservar pruebas");
-assert.equal(defensive.result, "no_clear_harmful_request");
+assert.equal(defensive.result, "allow_defensive_analysis");
 
 const report = generateReport({ facts: "😀".repeat(5), maxDescription: 3 });
 assert.equal(report.description.chars, 3);
