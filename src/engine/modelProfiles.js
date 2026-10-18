@@ -9,7 +9,7 @@ const GEN_BY_SIZE = {
   "0.5B": { temperature: 0.35, top_p: 0.8, max_tokens: 512 },
   "1B": { temperature: 0.4, top_p: 0.85, max_tokens: 640 },
   "1.5B": { temperature: 0.55, top_p: 0.9, max_tokens: 768 },
-  "3B": { temperature: 0.6, top_p: 0.9, max_tokens: 896 },
+  "3B": { temperature: 0.3, top_p: 0.85, max_tokens: 768 },
 };
 
 const DEFAULT_GEN = { temperature: 0.5, top_p: 0.9, max_tokens: 512 };
