@@ -214,7 +214,6 @@ export function EngineProvider({ children }) {
       modelId: id,
       contextWindow,
       history: history.map(({ role, content }) => ({ role, content })),
-      includeFewShot: id === "Llama-3.2-3B-Instruct-q4f16_1-MLC",
     });
     keRef.current.lastUserText = trimmed;
     keRef.current.lastMath = injected.math || null;
