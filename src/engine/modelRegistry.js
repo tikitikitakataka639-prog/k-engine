@@ -95,8 +95,8 @@ export const KERNEL_MODELS = {
     contextWindow: 4096,
     vramMB: 2260.66,
     lowResource: false,
-    // ctx 4096 → prompt small (el full no cabe); personalidad KERNEL igual
-    personality: "small",
+    // Prompt compacto específico para obediencia y análisis con contexto 4096.
+    personality: "3b",
     ...KERNEL_FLAGS,
     location: { definition: "code", weights: "browser-cache" },
   },
