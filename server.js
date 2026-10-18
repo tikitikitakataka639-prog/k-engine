@@ -14,6 +14,7 @@ import ctx from "./server/context.js";
 import inference from "./server/inference.js";
 import bridge from "./server/browser-bridge.js";
 import catalog from "./server/catalog.js";
+import { buildIntelligenceContext, evaluateMoralAction } from "./src/engine/intelligenceCore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,8 +136,9 @@ function prepare(b) {
   const id = b.conversation_id || crypto.randomUUID();
   const message = b.message.trim();
   const history = Array.isArray(b.context) && b.context.length ? b.context : (conversations.get(id) || []);
-  const built = ctx.build(history, message, persona.systemPrompt.length);
-  return { id, built, messages: [{ role: "system", content: persona.systemPrompt }, ...built.messages] };
+  const systemPrompt = persona.systemPrompt + "\n\n" + buildIntelligenceContext(message);
+  const built = ctx.build(history, message, systemPrompt.length);
+  return { id, built, messages: [{ role: "system", content: systemPrompt }, ...built.messages] };
 }
 function remember(id, built, answer) {
   conversations.delete(id); conversations.set(id, [...built.messages, { role: "assistant", content: answer }].slice(-cfg.contextMaxMessages));
@@ -149,6 +151,19 @@ async function handleChat(req, res) {
   const p = prepare(body);
   const meta = (model) => ({ model, backend, conversation_id: p.id, context: { used_messages: p.built.messages.length, dropped_messages: p.built.dropped } });
   const wantsStream = body.stream === true || /text\/event-stream/.test(req.headers.accept || "");
+  const moral = evaluateMoralAction(body.message);
+  if (moral.harmfulFacilitationRequested) {
+    const response = moral.safeAlternative;
+    remember(p.id, p.built, response);
+    const model = "kernel-moral-guard";
+    if (!wantsStream) return send(req, res, 200, { response, model, backend: "kernel-guard", conversation_id: p.id, context: { used_messages: p.built.messages.length, dropped_messages: p.built.dropped } });
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", ...corsHeaders(req) });
+    const ev = (name, obj) => res.write("event: " + name + "\ndata: " + JSON.stringify(obj) + "\n\n");
+    ev("meta", { backend: "kernel-guard", conversation_id: p.id });
+    ev("delta", { delta: response });
+    ev("done", { response, streamed: true, model, backend: "kernel-guard", conversation_id: p.id, context: { used_messages: p.built.messages.length, dropped_messages: p.built.dropped } });
+    return res.end();
+  }
   const ac = new AbortController();
   res.on("close", () => { if (!res.writableEnded) ac.abort(); });
 
