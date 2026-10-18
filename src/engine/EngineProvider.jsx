@@ -1,24 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { getSystemPrompt } from "./personality";
 import { injectPersonality, finalizeAssistantText } from "./personalityInjector";
+import { postToKernel, isAllowedKernelOrigin, BRIDGE_PROTOCOL } from "./kernelBridge";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
 import { getSetting, setSetting, loadChat, saveChat, clearChat } from "./storage";
 import { api, probeApi, tokenGet, tokenSet } from "../api/client";
-import { scanCaches, cacheApiSelfTest, classify as classifyDiag, formatCacheSummary, storageEstimateLine, fmtBytes } from "../api/cache";
-
-const KERNEL_ALLOWED_ORIGINS = [
-  "https://project-kernel-release-1-0-0.lovable.app",
-  "https://project-kernel-release-1-0-0.vercel.app",
-  "https://project-kernel-release-0-6-0.lovable.app",
-  "https://project-kernel-release-0-5-0.lovable.app",
-];
-function postToKernelOpener(opener, payload) {
-  if (!opener || opener.closed) return;
-  for (const origin of KERNEL_ALLOWED_ORIGINS) {
-    try { opener.postMessage(payload, origin); } catch {}
-  }
-}
+import { scanCaches, cacheApiSelfTest, classify as classifyDiag, formatCacheSummary } from "../api/cache";
 
 const EngineContext = createContext(null);
 export function useEngine() {
@@ -151,7 +138,6 @@ export function EngineProvider({ children }) {
           setGenerating(false);
           KE.labGenId = null;
           setMessages((prev) => {
-            // Sanitizar refusals corporativos residuales antes de fijar el mensaje
             const next = prev.map((m) => {
               if (m.streaming || (m.role === "assistant" && m === prev[prev.length - 1])) {
                 return { role: m.role, content: finalizeAssistantText(m.content) };
@@ -165,7 +151,7 @@ export function EngineProvider({ children }) {
               const answer = [...next].reverse().find((m) => m.role === "assistant")?.content || "";
               try {
                 if (window.opener && !window.opener.closed) {
-                  postToKernelOpener(window.opener, { type: "KENGINE_RESPONSE", requestId, response: answer });
+                  postToKernel(window.opener, { type: BRIDGE_PROTOCOL.response, requestId, response: answer });
                 }
               } catch {}
             }
@@ -181,7 +167,12 @@ export function EngineProvider({ children }) {
             KE.bridgeRequestId = null;
             try {
               if (window.opener && !window.opener.closed) {
-                postToKernelOpener(window.opener, { type: "KENGINE_ERROR", requestId, error: String(d.message || "Fallo"), code: "generation_failed" });
+                postToKernel(window.opener, {
+                  type: BRIDGE_PROTOCOL.error,
+                  requestId,
+                  error: String(d.message || "Fallo"),
+                  code: "generation_failed",
+                });
               }
             } catch {}
           }
@@ -202,15 +193,20 @@ export function EngineProvider({ children }) {
     keRef.current.labGenId = genId;
     const catalogEntry = (m.catalog?.models || []).find((x) => x.id === id);
     const contextWindow = catalogEntry?.contextWindow || 4096;
-    // Inyector: system KERNEL + few-shot anti-refusal + historial recortado al contexto
-    const { messages: payload, maxTokens } = injectPersonality({
+    const { messages: payload, maxTokens, temperature, top_p } = injectPersonality({
       modelId: id,
       contextWindow,
       history: history.map(({ role, content }) => ({ role, content })),
-      maxTokens: 512,
-      includeFewShot: true,
+      includeFewShot: false,
     });
-    modelManager.generate({ id: genId, model: id, messages: payload, max_tokens: maxTokens });
+    modelManager.generate({
+      id: genId,
+      model: id,
+      messages: payload,
+      max_tokens: maxTokens,
+      temperature,
+      top_p,
+    });
     return true;
   }, []);
 
@@ -220,8 +216,8 @@ export function EngineProvider({ children }) {
     const announce = () => {
       try {
         if (!opener.closed) {
-          postToKernelOpener(opener, {
-            type: "KENGINE_BRIDGE_READY",
+          postToKernel(opener, {
+            type: BRIDGE_PROTOCOL.ready,
             modelReady: Boolean(mmRef.current.loadedId) && mmRef.current.models[mmRef.current.loadedId]?.status === "READY",
             model: mmRef.current.loadedId || null,
           });
@@ -229,13 +225,15 @@ export function EngineProvider({ children }) {
       } catch {}
     };
     const onMessage = (event) => {
-      if (!KERNEL_ALLOWED_ORIGINS.includes(event.origin) || event.source !== window.opener) return;
+      if (!isAllowedKernelOrigin(event.origin) || event.source !== window.opener) return;
       const data = event.data;
-      if (!data || data.type !== "KERNEL_REQUEST") return;
+      if (!data || data.type !== BRIDGE_PROTOCOL.request) return;
       const requestId = typeof data.requestId === "string" ? data.requestId.slice(0, 120) : "";
       const prompt = typeof data.message === "string" ? data.message.trim() : "";
       const replyError = (error, code) => {
-        try { postToKernelOpener(window.opener, { type: "KENGINE_ERROR", requestId, error, code }); } catch {}
+        try {
+          postToKernel(window.opener, { type: BRIDGE_PROTOCOL.error, requestId, error, code }, event.origin);
+        } catch {}
       };
       if (!requestId || !prompt || prompt.length > 8000) {
         replyError("Solicitud vacía o demasiado larga.", "invalid_request");
