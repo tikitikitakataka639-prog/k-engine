@@ -32,7 +32,7 @@ export const KERNEL_MODEL_IDS = [
   "Llama-3.2-3B-Instruct-q4f16_1-MLC",
 ];
 
-export const DEFAULT_MODEL_ID = KERNEL_MODEL_IDS[0];
+export const DEFAULT_MODEL_ID = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
 
 /** Flags comunes: todos los modelos del registro son KERNEL sin límites corporativos. */
 const KERNEL_FLAGS = {
