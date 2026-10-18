@@ -30,11 +30,11 @@ assert.ok(moral.safeAlternative);
 const defensive = evaluateMoralAction("Cómo denunciar una amenaza y conservar pruebas");
 assert.equal(defensive.result, "no_clear_harmful_request");
 
-const report = generateReport({ facts: "😀".repeat(5), maxChars: 3 });
-assert.equal(report.characterCount, 3);
-assert.equal(report.withinLimit, true);
-assert.equal(report.truncated, true);
-assert.equal(Array.from(report.text).length, 3);
+const report = generateReport({ facts: "😀".repeat(5), maxDescription: 3 });
+assert.equal(report.description.chars, 3);
+assert.equal(report.description.withinLimit, true);
+assert.equal(report.description.truncated, true);
+assert.equal(Array.from(report.description.text).length, 3);
 
 assert.equal(validateAssessment({ observedFacts: [], inferences: [], unknowns: [], riskLevel: "review", humanReviewRequired: true }).valid, true);
 assert.equal(validateAssessment({}).valid, false);
