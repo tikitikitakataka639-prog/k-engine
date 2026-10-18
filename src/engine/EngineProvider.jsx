@@ -69,12 +69,25 @@ export function EngineProvider({ children }) {
   useEffect(() => {
     let off = false;
     (async () => {
-      const [url, vram, sel] = await Promise.all([getSetting("kernelUrl", ""), getSetting("vramGB", null), getSetting("selectedModel", null)]);
+      const [url, vram, sel, brainModelVersion] = await Promise.all([
+        getSetting("kernelUrl", ""),
+        getSetting("vramGB", null),
+        getSetting("selectedModel", null),
+        getSetting("brainModelVersion", 0),
+      ]);
       if (off) return;
       setKernelUrlState(url || "");
       setManualVramState(vram);
       await modelManager.init();
-      if (sel) modelManager.select(sel);
+      // Migración única: convertir Llama 3.2 3B en cerebro predeterminado sin sobrescribir futuras elecciones del usuario.
+      if (Number(brainModelVersion) < 1) {
+        const brainId = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
+        modelManager.select(brainId);
+        await setSetting("selectedModel", brainId);
+        await setSetting("brainModelVersion", 1);
+      } else if (sel) {
+        modelManager.select(sel);
+      }
     })();
     return () => { off = true; };
   }, []);
