@@ -69,9 +69,14 @@ export function injectPersonality({
 
 /**
  * Post-proceso de salida. Si math.hit, el resultado verificado manda.
+ * Re-resuelve math desde userText si no viene en opts (ruta lab robusta).
  */
 export function finalizeAssistantText(raw, userText, opts = {}) {
-  const math = opts.math || null;
+  let math = opts.math || null;
+  if (!math?.hit && userText) {
+    const resolved = trySolveMath(userText);
+    if (resolved.hit) math = resolved;
+  }
   const mathHit = opts.mathHit ?? math?.hit ?? false;
   const mathData = opts.mathData ?? math?.data ?? null;
   const mathSummary = opts.mathSummary ?? math?.summary ?? "";

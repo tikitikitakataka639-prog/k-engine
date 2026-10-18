@@ -1,6 +1,6 @@
 {
   "name": "k-engine",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "description": "K.ENGINE — motor de respuesta para KERNEL: API HTTP (health/models/chat/SSE) + UI React/Vite con WebLLM/WebGPU en el navegador.",
   "engines": {
@@ -14,11 +14,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
-    "test": "node tests/server.test.js && node tests/cache-errors.test.js && node tests/mathTools.test.js && node tests/slm-eval.harness.js",
+    "test": "node tests/server.test.js && node tests/cache-errors.test.js && node tests/mathTools.test.js && node tests/mathOverride.test.js && node tests/slm-eval.harness.js",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "test:cache": "node tests/cache-errors.test.js",
-    "test:math": "node tests/mathTools.test.js",
+    "test:math": "node tests/mathTools.test.js && node tests/mathOverride.test.js",
     "test:slm": "node tests/slm-eval.harness.js"
   },
   "dependencies": {
