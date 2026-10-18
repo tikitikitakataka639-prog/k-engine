@@ -1,6 +1,7 @@
 /**
  * personalityInjector.js
  * Orquesta: system KERNEL + perfiles SLM + math tool + contexto + genConfig.
+ * El lab y el bridge usan la misma ruta: injectPersonality → generate → finalizeAssistantText.
  */
 
 import { getSystemPrompt } from "./personality.js";
@@ -43,7 +44,9 @@ export function injectPersonality({
     workHistory = workHistory.slice(-maxMsgs);
   }
 
-  const useFs = includeFewShot === true || (includeFewShot !== false && profile.useFewShot && !math.hit && workHistory.length <= 2);
+  const useFs =
+    includeFewShot === true ||
+    (includeFewShot !== false && profile.useFewShot && !math.hit && workHistory.length <= 2);
   if (useFs) {
     workHistory = [...SLM_FEWSHOT, ...workHistory];
   }
@@ -64,8 +67,19 @@ export function injectPersonality({
   };
 }
 
+/**
+ * Post-proceso de salida. Si math.hit, el resultado verificado manda.
+ */
 export function finalizeAssistantText(raw, userText, opts = {}) {
-  return guardAssistantOutput(raw, userText, opts);
+  const math = opts.math || null;
+  const mathHit = opts.mathHit ?? math?.hit ?? false;
+  const mathData = opts.mathData ?? math?.data ?? null;
+  const mathSummary = opts.mathSummary ?? math?.summary ?? "";
+  return guardAssistantOutput(raw, userText, {
+    mathHit: Boolean(mathHit),
+    mathData,
+    mathSummary,
+  });
 }
 
 export function sanitizeCorporateRefusal(text) {
