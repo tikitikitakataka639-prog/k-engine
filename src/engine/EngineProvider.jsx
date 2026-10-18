@@ -137,10 +137,14 @@ export function EngineProvider({ children }) {
         } else if (d.type === "gendone" && d.id === KE.labGenId) {
           setGenerating(false);
           KE.labGenId = null;
+          const finalUserText = KE.lastUserText;
+          const finalMath = KE.lastMath;
+          KE.lastUserText = "";
+          KE.lastMath = null;
           setMessages((prev) => {
             const next = prev.map((m) => {
               if (m.streaming || (m.role === "assistant" && m === prev[prev.length - 1])) {
-                return { role: m.role, content: finalizeAssistantText(m.content) };
+                return { role: m.role, content: finalizeAssistantText(m.content, finalUserText, { math: finalMath?.hit ? finalMath : null }) };
               }
               return m.streaming ? { role: m.role, content: m.content } : m;
             });
