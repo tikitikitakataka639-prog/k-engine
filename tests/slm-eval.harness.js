@@ -52,7 +52,11 @@ export function runOfflineEval() {
   report.profiles.push({ id: "DEFAULT_MODEL_ID", ok: defaultOk, value: DEFAULT_MODEL_ID });
   if (defaultOk) report.passed++; else report.failed++;
   const prompt3B = getSystemPrompt(DEFAULT_MODEL_ID, 4096);
-  const promptOk = /No te presentes como IA/.test(prompt3B) && /HIPÓTESIS/.test(prompt3B);
+  const promptOk =
+    /No te presentes como IA/.test(prompt3B) &&
+    /HIPÓTESIS/.test(prompt3B) &&
+    /no demuestra que alguien mienta/i.test(prompt3B) &&
+    /No inventes indicios/i.test(prompt3B);
   report.inject.push({ id: "Llama-3.2-3B personality prompt", ok: promptOk });
   if (promptOk) report.passed++; else report.failed++;
 

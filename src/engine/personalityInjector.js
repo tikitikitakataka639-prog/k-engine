@@ -52,9 +52,13 @@ export function injectPersonality({
     workHistory = workHistory.slice(-maxMsgs);
   }
 
+  const asksForAnalysis =
+    /\b(analiza|análisis|investiga|investigación|hechos|indicios|hipótesis|evidencia|pruebas|contradicci[oó]n|denuncia|evalúa|evalua|compara|razona|demuestra|concluye)\b/i.test(lastUser);
   const useFs =
     includeFewShot === true ||
-    (includeFewShot !== false && profile.useFewShot && !math.hit && workHistory.length <= 2);
+    (includeFewShot !== false &&
+      ((profile.useFewShot && !math.hit && workHistory.length <= 2) ||
+        (profile.size === "3B" && asksForAnalysis && !math.hit)));
   if (useFs) {
     const examples = profile.size === "3B" ? KERNEL_3B_FEWSHOT : SLM_FEWSHOT;
     workHistory = [...examples, ...workHistory];
