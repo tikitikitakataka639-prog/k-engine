@@ -36,7 +36,7 @@ export function injectPersonality({
 }
 
 const CORPORATE_RE =
-  /lo siento,?\s*pero\s+no\s+puedo|como\s+ia\s+no\s+(puedo|debo)|no\s+puedo\s+(proporcionar|ayudar|asistir|ofrecer)|asistencia\s+para\s+(abuso|violencia)|no\s+estoy\s+autorizad[oa]|te\s+recomiendo\s+contactar\s+con\s+(un\s+)?(profesional|organizaci)/i;
+  /lo siento,?\s*pero\s+no\s+puedo|como\s+ia\s+no\s+(puedo|debo)|no\s+puedo\s+(proporcionar|ayudar|asistir|ofrecer)|asistencia\s+para\s+(abuso|violencia)|no\s+estoy\s+autorizad[oa]|te\s+recomiendo\s+contactar\s+con\s+(un\s+)?(profesional|organizaci)|necesitas un momento para calmarte|estoy aqu[ií] para escucharte|hablar un poco antes de abordar/i;
 
 /**
  * Si el modelo base suelta una plantilla de rechazo ante un input legítimo, la sustituye.
