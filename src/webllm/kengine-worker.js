@@ -390,8 +390,10 @@ self.onmessage = async (e) => {
       let firstTokenMs = null;
       const chunks = await engine.chat.completions.create({
         messages: msg.messages,
-        temperature: 0.7,
-        max_tokens: msg.max_tokens || 1024,
+        // Respecta el perfil definido por modelo en genConfig.js.
+        temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.6,
+        top_p: Number.isFinite(Number(msg.top_p)) ? Number(msg.top_p) : 0.9,
+        max_tokens: Number.isFinite(Number(msg.max_tokens)) ? Math.max(1, Number(msg.max_tokens)) : 512,
         stream: true,
         stream_options: { include_usage: true },
       });

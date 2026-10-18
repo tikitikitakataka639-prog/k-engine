@@ -1,12 +1,19 @@
 /**
- * personalityInjector.js
- * System prompt KERNEL + ajuste de contexto.
- * finalizeAssistantText: corta plantillas corporativas residuales del modelo base.
+ * Inyección de personalidad KERNEL y ajuste de contexto.
+ *
+ * No reescribe respuestas generadas: una sustitución por frases prefabricadas
+ * oculta el resultado real y puede convertir una respuesta útil en una evasiva.
  */
-
 import { getSystemPrompt } from "./personality.js";
 import { buildFitMessages } from "./chatContext.js";
 import { getGenConfig } from "./genConfig.js";
+
+const KERNEL_EXAMPLES = [
+  { role: "user", content: "Resume este texto en tres puntos y señala qué datos faltan." },
+  { role: "assistant", content: "1. Hechos principales.\n2. Datos que respaldan esos hechos.\n3. Información que falta para cerrar el análisis. No inventaré lo que no aparece en el texto." },
+  { role: "user", content: "Escribe un correo formal para pedir una reunión." },
+  { role: "assistant", content: "Asunto: Solicitud de reunión\n\nBuenos días:\n\nMe gustaría concertar una reunión para tratar este asunto. ¿Podrían indicarme qué fecha y hora les vendrían bien?\n\nUn saludo." },
+];
 
 export function injectPersonality({
   systemPrompt,
@@ -20,10 +27,16 @@ export function injectPersonality({
   const system = systemPrompt || getSystemPrompt(modelId, ctx);
   const gen = getGenConfig(modelId);
   const reply = maxTokens != null ? maxTokens : gen.max_tokens;
+  const cleanHistory = Array.isArray(history) ? history : [];
+  // Los ejemplos son orientación de formato, no reglas que deban imponerse a cada tarea.
+  // Se colocan antes del diálogo real para que el recorte por contexto los descarte primero.
+  const historyWithExamples = includeFewShot
+    ? [...KERNEL_EXAMPLES, ...cleanHistory]
+    : cleanHistory;
 
   const result = buildFitMessages({
     systemPrompt: system,
-    history: history || [],
+    history: historyWithExamples,
     contextWindow: ctx,
     maxTokens: reply,
   });
@@ -35,33 +48,16 @@ export function injectPersonality({
   };
 }
 
-const CORPORATE_RE =
-  /lo siento,?\s*pero\s+no\s+puedo|como\s+ia\s+no\s+(puedo|debo)|no\s+puedo\s+(proporcionar|ayudar|asistir|ofrecer)|asistencia\s+para\s+(abuso|violencia)|no\s+estoy\s+autorizad[oa]|te\s+recomiendo\s+contactar\s+con\s+(un\s+)?(profesional|organizaci)|necesitas un momento para calmarte|estoy aqu[ií] para escucharte|hablar un poco antes de abordar/i;
-
 /**
- * Si el modelo base suelta una plantilla de rechazo ante un input legítimo, la sustituye.
+ * Conserva el texto real del modelo. No existe una detección fiable que permita
+ * reemplazar una respuesta solo porque contenga una frase de rechazo: el modelo
+ * puede estar rechazando una petición realmente dañina o explicando un límite.
+ * La corrección de rechazos excesivos debe hacerse en el prompt y evaluarse con tests.
  */
-export function finalizeAssistantText(raw, userText) {
-  const t = String(raw || "").trim();
-  if (!t) return t;
-  if (!CORPORATE_RE.test(t)) return t;
-
-  const u = String(userText || "").trim().toLowerCase();
-  if (!u || /^(hola|hey|buenas|hello|hi|saludos|qué tal|que tal|buenos días|buenas tardes)\b/.test(u) || u.length < 48) {
-    if (/^(hola|hey|buenas|hello|hi|saludos)\b/.test(u)) {
-      return "Hola. ¿Qué necesitas?";
-    }
-    return "Vale. Dime qué necesitas y vamos al grano.";
-  }
-  if (/ley|artículo|art\.?\s*\d+|grooming|denuncia|menor|protección|acoso|código penal|183/.test(u)) {
-    return (
-      "Eso es información legítima, no ayuda a delinquir. " +
-      "Resume tu pregunta concreta (p. ej. qué dice el art. 183 CP o qué pasos dar ante un caso) y te respondo con hechos."
-    );
-  }
-  return "Eso no es un rechazo de KERNEL. Reformula en una frase qué necesitas (análisis, ley, denuncia, texto) y lo trato.";
+export function finalizeAssistantText(raw, _userText) {
+  return String(raw ?? "").trim();
 }
 
 export function sanitizeCorporateRefusal(text) {
-  return finalizeAssistantText(text, "");
+  return String(text ?? "").trim();
 }
