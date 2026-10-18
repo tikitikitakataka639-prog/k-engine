@@ -6,6 +6,8 @@
 import { trySolveMath } from "../src/engine/mathTools.js";
 import { injectPersonality } from "../src/engine/personalityInjector.js";
 import { getModelProfile } from "../src/engine/modelProfiles.js";
+import { DEFAULT_MODEL_ID } from "../src/engine/modelRegistry.js";
+import { getSystemPrompt } from "../src/engine/personality.js";
 
 export const MATH_CASES = [
   { id: "M01", input: "calcula 12*8+3", expect: { contains: ["99"] } },
@@ -40,10 +42,19 @@ export const MODELS = [
   "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
   "Llama-3.2-1B-Instruct-q4f16_1-MLC",
   "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+  "Llama-3.2-3B-Instruct-q4f16_1-MLC",
 ];
 
 export function runOfflineEval() {
   const report = { math: [], profiles: [], inject: [], passed: 0, failed: 0 };
+
+  const defaultOk = DEFAULT_MODEL_ID === "Llama-3.2-3B-Instruct-q4f16_1-MLC";
+  report.profiles.push({ id: "DEFAULT_MODEL_ID", ok: defaultOk, value: DEFAULT_MODEL_ID });
+  if (defaultOk) report.passed++; else report.failed++;
+  const prompt3B = getSystemPrompt(DEFAULT_MODEL_ID, 4096);
+  const promptOk = /No te presentes como IA/.test(prompt3B) && /HIPÓTESIS/.test(prompt3B);
+  report.inject.push({ id: "Llama-3.2-3B personality prompt", ok: promptOk });
+  if (promptOk) report.passed++; else report.failed++;
 
   for (const c of MATH_CASES) {
     const r = trySolveMath(c.input);
@@ -61,13 +72,14 @@ export function runOfflineEval() {
     else report.failed++;
   }
 
-  for (const id of ["Qwen2.5-0.5B-Instruct-q4f16_1-MLC", "Llama-3.2-1B-Instruct-q4f16_1-MLC"]) {
+  for (const id of ["Qwen2.5-0.5B-Instruct-q4f16_1-MLC", "Llama-3.2-1B-Instruct-q4f16_1-MLC", "Llama-3.2-3B-Instruct-q4f16_1-MLC"]) {
     const inj = injectPersonality({
       modelId: id,
       contextWindow: 4096,
       history: [{ role: "user", content: MATH_CASES[4].input }],
+      includeFewShot: id === "Llama-3.2-3B-Instruct-q4f16_1-MLC",
     });
-    const ok = inj.math?.hit && /HERRAMIENTA MATEMÁTICA/.test(inj.messages[0]?.content || "");
+    const ok = inj.math?.hit && /HERRAMIENTA MATEMÁTICA/.test(inj.messages[0]?.content || "") && (id !== "Llama-3.2-3B-Instruct-q4f16_1-MLC" || inj.messages.some((m) => m.content.includes("No convierto sospechas") || m.content.includes("no convierto sospechas")));
     report.inject.push({ id, ok });
     if (ok) report.passed++;
     else report.failed++;

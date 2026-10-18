@@ -2,6 +2,7 @@
 // Todos los modelos del modelRegistry llevan kernelPersonality + corporateLimits: false.
 import { SYSTEM_PROMPT_FULL } from "./personality.full.js";
 import { SYSTEM_PROMPT_SMALL } from "./personality.small.js";
+import { SYSTEM_PROMPT_3B } from "./personality.3b.js";
 import { getKernelModel } from "./modelRegistry.js";
 
 export const KERNEL_PERSONALITY = {
@@ -10,6 +11,7 @@ export const KERNEL_PERSONALITY = {
   role: "Motor de análisis universal para redes sociales, denuncias y moderación",
   systemPrompt: SYSTEM_PROMPT_FULL,
   systemPromptSmall: SYSTEM_PROMPT_SMALL,
+  systemPrompt3B: SYSTEM_PROMPT_3B,
   corporateLimits: false,
   badge: "KERNEL · sin límites corporativos",
 };
@@ -27,6 +29,7 @@ export function getSystemPrompt(modelId, contextWindow) {
   const ctx = Number(contextWindow);
   const meta = getKernelModel(id);
 
+  if (meta?.personality === "3b") return SYSTEM_PROMPT_3B;
   if (meta?.personality === "full" && Number.isFinite(ctx) && ctx >= 8192) {
     return SYSTEM_PROMPT_FULL;
   }

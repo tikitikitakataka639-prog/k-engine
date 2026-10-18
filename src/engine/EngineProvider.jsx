@@ -58,7 +58,7 @@ export function EngineProvider({ children }) {
   const [control, setControl] = useState(emptyControl);
   const [apiState, setApiState] = useState({ ok: false, version: null });
 
-  const keRef = useRef({ apiOk: false, cid: null, lastReported: "", job: null, diag: [], labGenId: null, started: false, bridgeRequestId: null });
+  const keRef = useRef({ apiOk: false, cid: null, lastReported: "", job: null, diag: [], labGenId: null, started: false, bridgeRequestId: null, lastUserText: "", lastMath: null });
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const mmRef = useRef(mm);
@@ -69,12 +69,25 @@ export function EngineProvider({ children }) {
   useEffect(() => {
     let off = false;
     (async () => {
-      const [url, vram, sel] = await Promise.all([getSetting("kernelUrl", ""), getSetting("vramGB", null), getSetting("selectedModel", null)]);
+      const [url, vram, sel, brainModelVersion] = await Promise.all([
+        getSetting("kernelUrl", ""),
+        getSetting("vramGB", null),
+        getSetting("selectedModel", null),
+        getSetting("brainModelVersion", 0),
+      ]);
       if (off) return;
       setKernelUrlState(url || "");
       setManualVramState(vram);
       await modelManager.init();
-      if (sel) modelManager.select(sel);
+      // Migración única: convertir Llama 3.2 3B en cerebro predeterminado sin sobrescribir futuras elecciones del usuario.
+      if (Number(brainModelVersion) < 1) {
+        const brainId = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
+        modelManager.select(brainId);
+        await setSetting("selectedModel", brainId);
+        await setSetting("brainModelVersion", 1);
+      } else if (sel) {
+        modelManager.select(sel);
+      }
     })();
     return () => { off = true; };
   }, []);
@@ -137,10 +150,14 @@ export function EngineProvider({ children }) {
         } else if (d.type === "gendone" && d.id === KE.labGenId) {
           setGenerating(false);
           KE.labGenId = null;
+          const finalUserText = KE.lastUserText;
+          const finalMath = KE.lastMath;
+          KE.lastUserText = "";
+          KE.lastMath = null;
           setMessages((prev) => {
             const next = prev.map((m) => {
               if (m.streaming || (m.role === "assistant" && m === prev[prev.length - 1])) {
-                return { role: m.role, content: finalizeAssistantText(m.content) };
+                return { role: m.role, content: finalizeAssistantText(m.content, finalUserText, { math: finalMath?.hit ? finalMath : null }) };
               }
               return m.streaming ? { role: m.role, content: m.content } : m;
             });
@@ -193,19 +210,21 @@ export function EngineProvider({ children }) {
     keRef.current.labGenId = genId;
     const catalogEntry = (m.catalog?.models || []).find((x) => x.id === id);
     const contextWindow = catalogEntry?.contextWindow || 4096;
-    const { messages: payload, maxTokens, temperature, top_p } = injectPersonality({
+    const injected = injectPersonality({
       modelId: id,
       contextWindow,
       history: history.map(({ role, content }) => ({ role, content })),
-      includeFewShot: false,
+      includeFewShot: id === "Llama-3.2-3B-Instruct-q4f16_1-MLC",
     });
+    keRef.current.lastUserText = trimmed;
+    keRef.current.lastMath = injected.math || null;
     modelManager.generate({
       id: genId,
       model: id,
-      messages: payload,
-      max_tokens: maxTokens,
-      temperature,
-      top_p,
+      messages: injected.messages,
+      max_tokens: injected.maxTokens,
+      temperature: injected.temperature,
+      top_p: injected.top_p,
     });
     return true;
   }, []);

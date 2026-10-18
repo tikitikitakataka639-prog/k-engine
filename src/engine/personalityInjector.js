@@ -7,7 +7,7 @@
 import { getSystemPrompt } from "./personality.js";
 import { buildFitMessages } from "./chatContext.js";
 import { getGenConfig } from "./genConfig.js";
-import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT } from "./modelProfiles.js";
+import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT, KERNEL_3B_FEWSHOT } from "./modelProfiles.js";
 import { trySolveMath, mathContextNote } from "./mathTools.js";
 import { guardAssistantOutput } from "./outputGuard.js";
 import {
@@ -56,7 +56,8 @@ export function injectPersonality({
     includeFewShot === true ||
     (includeFewShot !== false && profile.useFewShot && !math.hit && workHistory.length <= 2);
   if (useFs) {
-    workHistory = [...SLM_FEWSHOT, ...workHistory];
+    const examples = profile.size === "3B" ? KERNEL_3B_FEWSHOT : SLM_FEWSHOT;
+    workHistory = [...examples, ...workHistory];
   }
 
   const result = buildFitMessages({
