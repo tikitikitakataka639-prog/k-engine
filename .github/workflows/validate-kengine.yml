@@ -1,0 +1,30 @@
+name: Validate K.ENGINE
+
+on:
+  push:
+    branches:
+      - feature/llama3b-kernel-brain
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Node.js
+        uses: actions/setup-node@1e60f620b9541d7d1b7a8e2f9a0c9d7c5a3a5f4e # v4.0.3
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-package-lock
+      - name: Run test suite
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
