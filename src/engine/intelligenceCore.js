@@ -83,7 +83,8 @@ export function buildIntelligenceContext(input) {
 export function generateReport({ facts = "", platform = "", jurisdiction = "", law = "", maxChars = 1000 } = {}) {
   const text = cleanText(facts);
   const limit = Number.isInteger(maxChars) && maxChars >= 0 ? maxChars : 1000;
-  const draft = text.length <= limit ? text : Array.from(text).slice(0, limit).join("");
+  const points = Array.from(text);
+  const draft = points.length <= limit ? text : points.slice(0, limit).join("");
   const count = Array.from(draft).length;
   return {
     text: draft,
@@ -93,8 +94,42 @@ export function generateReport({ facts = "", platform = "", jurisdiction = "", l
     characterCount: count,
     maxChars: limit,
     withinLimit: count <= limit,
-    truncated: Array.from(text).length > limit,
+    truncated: points.length > limit,
     countMethod: "Unicode code points; platform-specific counting may differ for emoji and URLs.",
+  };
+}
+
+
+/** Aggregate public post/comment evidence; never infer a person's identity or guilt. */
+export function analyzeProfileEvidence(items) {
+  const entries = (Array.isArray(items) ? items : []).filter((item) => item && typeof item.text === "string");
+  const analyses = entries.map((item, index) => ({
+    index,
+    source: cleanText(item.source || ""),
+    date: cleanText(item.date || ""),
+    analysis: analyzeEvidence(item.text),
+  }));
+  const bySignal = new Map();
+  for (const entry of analyses) {
+    for (const signal of entry.analysis.indicators) {
+      const current = bySignal.get(signal.id) || { ...signal, occurrences: 0, entries: [] };
+      current.occurrences += 1;
+      current.entries.push(entry.index);
+      bySignal.set(signal.id, current);
+    }
+  }
+  const signals = [...bySignal.values()];
+  const level = signals.some((s) => s.level === "urgent_review")
+    ? "urgent_review"
+    : signals.length ? "review" : "insufficient_evidence";
+  return {
+    itemsReviewed: entries.length,
+    signals,
+    level,
+    conclusion: signals.length
+      ? "Se han encontrado fragmentos que merecen revisión contextual; no permiten por sí solos concluir que el titular del perfil sea peligroso o culpable."
+      : "Con el material aportado no se han detectado estos patrones explícitos. Esto no demuestra que el perfil sea seguro.",
+    humanReviewRequired: signals.length > 0,
   };
 }
 
