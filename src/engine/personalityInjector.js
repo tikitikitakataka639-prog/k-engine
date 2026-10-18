@@ -1,7 +1,7 @@
 /**
  * personalityInjector.js
- * Orquesta: system KERNEL + perfiles SLM + math tool + contexto + genConfig.
- * El lab y el bridge usan la misma ruta: injectPersonality → generate → finalizeAssistantText.
+ * Orquesta: system KERNEL + perfiles SLM + math + Intelligence Core + contexto + genConfig.
+ * Lab y bridge: injectPersonality → generate → finalizeAssistantText.
  */
 
 import { getSystemPrompt } from "./personality.js";
@@ -10,7 +10,11 @@ import { getGenConfig } from "./genConfig.js";
 import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT } from "./modelProfiles.js";
 import { trySolveMath, mathContextNote } from "./mathTools.js";
 import { guardAssistantOutput } from "./outputGuard.js";
-import { buildIntelligenceContext, evaluateMoralAction } from "./intelligenceCore.js";
+import {
+  buildIntelligenceContext,
+  evaluateMoralAction,
+  runPreInference,
+} from "./intelligenceCore.js";
 
 export function injectPersonality({
   systemPrompt,
@@ -30,6 +34,7 @@ export function injectPersonality({
 
   const math = trySolveMath(lastUser);
   const mathNote = math.hit ? mathContextNote(math) : "";
+  const pre = runPreInference(lastUser);
 
   let system = (systemPrompt || getSystemPrompt(modelId, ctx)).trim();
   if (profile.useSlmBlock) {
@@ -38,7 +43,8 @@ export function injectPersonality({
   if (mathNote) {
     system = system + "\n\n" + mathNote;
   }
-  system = system + "\n\n" + buildIntelligenceContext(lastUser);
+  // Intelligence Core — todos los modelos
+  system = system + "\n\n" + pre.contextBlock;
 
   let workHistory = hist.map((m) => ({ role: m.role, content: String(m.content || "") }));
   const maxMsgs = profile.maxHistoryTurns * 2;
@@ -66,16 +72,23 @@ export function injectPersonality({
     top_p: gen.top_p,
     math,
     profile,
+    intelligence: {
+      evidence: pre.evidence,
+      moral: pre.moral,
+      modulesRun: pre.modulesRun,
+    },
   };
 }
 
 /**
- * Post-proceso de salida. Si math.hit, el resultado verificado manda.
- * Re-resuelve math desde userText si no viene en opts (ruta lab robusta).
+ * Post-proceso. Moral (facilitación de daño) → math verificado → outputGuard.
  */
 export function finalizeAssistantText(raw, userText, opts = {}) {
-  const moral = evaluateMoralAction(userText);
-  if (moral.harmfulFacilitationRequested) return moral.safeAlternative;
+  const moral = evaluateMoralAction(userText || "");
+  if (moral.harmfulFacilitationRequested && moral.safeAlternative) {
+    return moral.safeAlternative;
+  }
+
   let math = opts.math || null;
   if (!math?.hit && userText) {
     const resolved = trySolveMath(userText);
