@@ -56,7 +56,8 @@ export function injectPersonality({
     includeFewShot === true ||
     (includeFewShot !== false && profile.useFewShot && !math.hit && workHistory.length <= 2);
   if (useFs) {
-    workHistory = [...SLM_FEWSHOT, ...workHistory];
+    const examples = profile.size === "3B" ? KERNEL_3B_FEWSHOT : SLM_FEWSHOT;
+    workHistory = [...examples, ...workHistory];
   }
 
   const result = buildFitMessages({
