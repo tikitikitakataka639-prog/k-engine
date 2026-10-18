@@ -197,19 +197,21 @@ export function EngineProvider({ children }) {
     keRef.current.labGenId = genId;
     const catalogEntry = (m.catalog?.models || []).find((x) => x.id === id);
     const contextWindow = catalogEntry?.contextWindow || 4096;
-    const { messages: payload, maxTokens, temperature, top_p } = injectPersonality({
+    const injected = injectPersonality({
       modelId: id,
       contextWindow,
       history: history.map(({ role, content }) => ({ role, content })),
-      includeFewShot: false,
+      includeFewShot: id === "Llama-3.2-3B-Instruct-q4f16_1-MLC",
     });
+    keRef.current.lastUserText = trimmed;
+    keRef.current.lastMath = injected.math || null;
     modelManager.generate({
       id: genId,
       model: id,
-      messages: payload,
-      max_tokens: maxTokens,
-      temperature,
-      top_p,
+      messages: injected.messages,
+      max_tokens: injected.maxTokens,
+      temperature: injected.temperature,
+      top_p: injected.top_p,
     });
     return true;
   }, []);
