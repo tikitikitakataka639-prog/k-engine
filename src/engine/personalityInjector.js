@@ -10,6 +10,7 @@ import { getGenConfig } from "./genConfig.js";
 import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT } from "./modelProfiles.js";
 import { trySolveMath, mathContextNote } from "./mathTools.js";
 import { guardAssistantOutput } from "./outputGuard.js";
+import { buildIntelligenceContext, evaluateMoralAction } from "./intelligenceCore.js";
 
 export function injectPersonality({
   systemPrompt,
@@ -37,6 +38,7 @@ export function injectPersonality({
   if (mathNote) {
     system = system + "\n\n" + mathNote;
   }
+  system = system + "\n\n" + buildIntelligenceContext(lastUser);
 
   let workHistory = hist.map((m) => ({ role: m.role, content: String(m.content || "") }));
   const maxMsgs = profile.maxHistoryTurns * 2;
@@ -72,6 +74,8 @@ export function injectPersonality({
  * Re-resuelve math desde userText si no viene en opts (ruta lab robusta).
  */
 export function finalizeAssistantText(raw, userText, opts = {}) {
+  const moral = evaluateMoralAction(userText);
+  if (moral.harmfulFacilitationRequested) return moral.safeAlternative;
   let math = opts.math || null;
   if (!math?.hit && userText) {
     const resolved = trySolveMath(userText);
