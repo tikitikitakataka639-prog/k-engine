@@ -83,11 +83,30 @@ export function runOfflineEval() {
       history: [{ role: "user", content: MATH_CASES[4].input }],
       includeFewShot: id === "Llama-3.2-3B-Instruct-q4f16_1-MLC",
     });
-    const ok = inj.math?.hit && /HERRAMIENTA MATEMÁTICA/.test(inj.messages[0]?.content || "") && (id !== "Llama-3.2-3B-Instruct-q4f16_1-MLC" || inj.messages.some((m) => m.content.includes("No convierto sospechas") || m.content.includes("no convierto sospechas")));
+    const ok = inj.math?.hit && /HERRAMIENTA MATEMÁTICA/.test(inj.messages[0]?.content || "") && (id !== "Llama-3.2-3B-Instruct-q4f16_1-MLC" || inj.messages.some((m) => /sin convertir sospechas/i.test(m.content)));
     report.inject.push({ id, ok });
     if (ok) report.passed++;
     else report.failed++;
   }
+
+  const brainId = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
+  const casual = injectPersonality({
+    modelId: brainId,
+    contextWindow: 4096,
+    history: [{ role: "user", content: "hola, estoy probando el modelo" }],
+  });
+  const casualNoFewShot = !casual.messages.some((m) => /Un registro muestra una tarjeta asignada a Ana/i.test(m.content));
+  report.inject.push({ id: "Llama 3B casual chat avoids analytical few-shot", ok: casualNoFewShot });
+  if (casualNoFewShot) report.passed++; else report.failed++;
+
+  const analytical = injectPersonality({
+    modelId: brainId,
+    contextWindow: 4096,
+    history: [{ role: "user", content: "Analiza el caso de la tarjeta de acceso: ¿la persona miente?" }],
+  });
+  const analyticalFewShot = analytical.messages.some((m) => /No se puede concluir que Ana mienta/i.test(m.content));
+  report.inject.push({ id: "Llama 3B analysis includes evidence-discipline example", ok: analyticalFewShot });
+  if (analyticalFewShot) report.passed++; else report.failed++;
 
   return report;
 }

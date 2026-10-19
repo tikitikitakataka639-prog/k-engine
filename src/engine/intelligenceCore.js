@@ -54,7 +54,7 @@ export function buildIntelligenceContext(input) {
   ];
   if (evidence.riskIndicators.length) {
     lines.push(
-      "AVISO HEURÍSTICO (no es conclusión): " +
+      "AVISO HEURÍSTICO (no es una conclusión): " +
         evidence.riskIndicators.map((s) => s.label).join("; ") +
         "."
     );

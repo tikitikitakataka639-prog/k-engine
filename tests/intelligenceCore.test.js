@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { analyzeEvidence, analyzeProfileEvidence, evaluateMoralAction, generateReport, buildIntelligenceContext, validateAssessment } from "../src/engine/intelligenceCore.js";
 
 const threat = analyzeEvidence("El mensaje dice: te voy a matar esta noche.");
-assert.equal(threat.level, "urgent_review");
-assert.equal(threat.indicators[0].id, "explicit_violence");
+assert.equal(threat.riskLevel, "urgent_review");
+assert.equal(threat.riskIndicators[0].id, "explicit_violence");
 assert.equal(threat.humanReviewRequired, true);
 
 const profile = analyzeProfileEvidence([
@@ -16,7 +16,7 @@ assert.equal(profile.signals[0].occurrences, 2);
 assert.match(profile.conclusion, /no permiten por sí solos concluir/);
 
 const ambiguous = analyzeEvidence("😭💢 las lolis son mejores que las adultas");
-assert.equal(ambiguous.level, "no_explicit_signal", "emoji/opinión ambigua no se convierte en amenaza");
+assert.equal(ambiguous.riskLevel, "no_explicit_signal", "emoji/opinión ambigua no se convierte en amenaza");
 assert.equal(ambiguous.humanReviewRequired, false);
 
 const quote = buildIntelligenceContext("Estoy denunciando un mensaje que dice te voy a matar.");
@@ -28,7 +28,7 @@ assert.equal(moral.result, "stop_and_redirect");
 assert.ok(moral.safeAlternative);
 
 const defensive = evaluateMoralAction("Cómo denunciar una amenaza y conservar pruebas");
-assert.equal(defensive.result, "no_clear_harmful_request");
+assert.equal(defensive.result, "allow_defensive_analysis");
 
 const report = generateReport({ facts: "😀".repeat(5), maxDescription: 3 });
 assert.equal(report.description.chars, 3);
