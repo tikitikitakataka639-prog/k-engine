@@ -5,6 +5,7 @@
  */
 
 import { getSystemPrompt } from "./personality.js";
+import { buildDenunciaKnowledgeContext } from "./denunciaKnowledge.js";
 import { buildFitMessages } from "./chatContext.js";
 import { getGenConfig } from "./genConfig.js";
 import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT, KERNEL_3B_FEWSHOT } from "./modelProfiles.js";
@@ -45,6 +46,9 @@ export function injectPersonality({
   }
   // Intelligence Core — todos los modelos
   system = system + "\n\n" + pre.contextBlock;
+  // Conocimiento especializado para denuncias: solo se inyecta cuando la petición lo necesita.
+  const denunciaContext = buildDenunciaKnowledgeContext(lastUser);
+  if (denunciaContext) system = system + "\n\n" + denunciaContext;
 
   let workHistory = hist.map((m) => ({ role: m.role, content: String(m.content || "") }));
   const maxMsgs = profile.maxHistoryTurns * 2;
