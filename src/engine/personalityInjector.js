@@ -7,6 +7,7 @@
  */
 
 import { getSystemPrompt } from "./personality.js";
+import { KERNEL_BRAIN } from "./kernelBrain.js";
 import { buildDenunciaKnowledgeContext } from "./denunciaKnowledge.js";
 import { buildFitMessages } from "./chatContext.js";
 import { getGenConfig } from "./genConfig.js";
@@ -48,7 +49,9 @@ export function injectPersonality({
     pre.contextBlock,
   ].filter((part) => typeof part === "string" && part.trim());
 
-  const systemParts = [...priorityContext, baseSystem];
+  // El núcleo compacto va antes del prompt de personalidad variable:
+  // buildFitMessages recorta por el final y así conserva método e identidad.
+  const systemParts = [...priorityContext, KERNEL_BRAIN, baseSystem];
   if (profile.useSlmBlock) systemParts.push(SLM_REASONING_BLOCK);
   const system = systemParts.join("\n\n");
 
