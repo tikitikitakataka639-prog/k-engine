@@ -49,7 +49,9 @@ export function injectPersonality({
     pre.contextBlock,
   ].filter((part) => typeof part === "string" && part.trim());
 
-  // El núcleo compacto va antes del prompt de personalidad variable: buildFitMessages\n  // recorta por el final y así conserva el método y la identidad esenciales.\n  const systemParts = [...priorityContext, KERNEL_BRAIN, baseSystem];
+  // El núcleo compacto va antes del prompt de personalidad variable:
+  // buildFitMessages recorta por el final y así conserva método e identidad.
+  const systemParts = [...priorityContext, KERNEL_BRAIN, baseSystem];
   if (profile.useSlmBlock) systemParts.push(SLM_REASONING_BLOCK);
   const system = systemParts.join("\n\n");
 
