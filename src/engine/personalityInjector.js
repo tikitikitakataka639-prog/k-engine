@@ -1,6 +1,8 @@
 /**
  * personalityInjector.js
  * Orquesta: system KERNEL + perfiles SLM + math + Intelligence Core + contexto + genConfig.
+ * Los contextos dinámicos prioritarios van al principio para que el recorte del contexto
+ * no los elimine en los modelos con un system prompt largo (especialmente Llama 3.2 3B).
  * Lab y bridge: injectPersonality → generate → finalizeAssistantText.
  */
 
@@ -12,7 +14,6 @@ import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT, KERNEL_3B_FEWSHOT } 
 import { trySolveMath, mathContextNote } from "./mathTools.js";
 import { guardAssistantOutput } from "./outputGuard.js";
 import {
-  buildIntelligenceContext,
   evaluateMoralAction,
   runPreInference,
 } from "./intelligenceCore.js";
@@ -36,19 +37,20 @@ export function injectPersonality({
   const math = trySolveMath(lastUser);
   const mathNote = math.hit ? mathContextNote(math) : "";
   const pre = runPreInference(lastUser);
-
-  let system = (systemPrompt || getSystemPrompt(modelId, ctx)).trim();
-  if (profile.useSlmBlock) {
-    system = system + "\n\n" + SLM_REASONING_BLOCK;
-  }
-  if (mathNote) {
-    system = system + "\n\n" + mathNote;
-  }
-  // Intelligence Core — todos los modelos
-  system = system + "\n\n" + pre.contextBlock;
-  // Conocimiento especializado para denuncias: solo se inyecta cuando la petición lo necesita.
+  const baseSystem = (systemPrompt || getSystemPrompt(modelId, ctx)).trim();
   const denunciaContext = buildDenunciaKnowledgeContext(lastUser);
-  if (denunciaContext) system = system + "\n\n" + denunciaContext;
+
+  // buildFitMessages recorta el system por el final. Colocar primero las instrucciones
+  // específicas evita perderlas detrás del prompt de personalidad de 3B.
+  const priorityContext = [
+    mathNote,
+    denunciaContext,
+    pre.contextBlock,
+  ].filter((part) => typeof part === "string" && part.trim());
+
+  const systemParts = [...priorityContext, baseSystem];
+  if (profile.useSlmBlock) systemParts.push(SLM_REASONING_BLOCK);
+  const system = systemParts.join("\n\n");
 
   let workHistory = hist.map((m) => ({ role: m.role, content: String(m.content || "") }));
   const maxMsgs = profile.maxHistoryTurns * 2;
