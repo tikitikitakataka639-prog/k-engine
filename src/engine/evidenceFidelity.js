@@ -6,9 +6,6 @@
  * al inicio de una frase con nombres propios.
  */
 
-const PERSON_REPORTING_VERBS =
-  /(?:dice|afirma|sostiene|declara|asegura|reconoce|niega|cuenta|cont[oó]|explica|responde|escribe|env[ií]a|recibi[oó]|denuncia|relata|mantiene|admite|a[ñn]ade|se[ñn]ala|indica|confirma|alega|responde|ofrece)\b/i;
-
 export function extractProperNameCandidates(text) {
   const t = String(text || "");
   const found = new Set();
@@ -17,7 +14,7 @@ export function extractProperNameCandidates(text) {
   // This intentionally prefers missed edge cases over false positives such as
   // "Recibí", "Reformulación" or headings at the start of a sentence.
   const re =
-    /(?:^|[\s«"'([{,;:])([A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}){0,2})(?=\s+(?:dice|afirma|sostiene|declara|asegura|reconoce|niega|cuenta|cont[oó]|explica|responde|escribe|env[ií]a|recibi[oó]|denuncia|relata|mantiene|admite|a[ñn]ade|se[ñn]ala|indica|confirma|alega|ofrece)\b)/gim;
+    /(?:^|[\s«"'([{,;:])([A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}){0,2})(?=\s+(?:dice|afirma|sostiene|declara|asegura|reconoce|niega|cuenta|cont[oó]|explica|responde|escribe|env[ií]a|recibi[oó]|denuncia|relata|mantiene|admite|a[ñn]ade|se[ñn]ala|indica|confirma|alega|ofrece)\b)/gm;
   let m;
   while ((m = re.exec(t)) !== null) {
     const candidate = m[1].trim();
