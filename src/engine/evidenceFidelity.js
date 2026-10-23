@@ -1,48 +1,37 @@
 /**
  * evidenceFidelity.js
  * Validador determinista de fidelidad al caso (post-inferencia).
- * Detecta nombres propios no presentes en el enunciado y elevación
- * de afirmaciones no verificadas a hechos. Conservador: prioriza
- * no marcar respuestas válidas.
+ * Conservador: solo marca nombres cuando aparecen como sujeto de una
+ * declaración atribuida; evita confundir títulos y palabras capitalizadas
+ * al inicio de una frase con nombres propios.
  */
-
-const STOP_CAPS = new Set([
-  "El", "La", "Los", "Las", "Un", "Una", "Unos", "Unas", "Lo", "Al", "Del",
-  "En", "De", "Por", "Para", "Con", "Sin", "Sobre", "Entre", "Hacia", "Hasta",
-  "Si", "No", "Sí", "Que", "Qué", "Cuál", "Cuáles", "Cómo", "Cuándo", "Dónde",
-  "Porqué", "Porque", "Pero", "Aunque", "Cuando", "Donde", "Como", "Según",
-  "Hechos", "Indicios", "Hipótesis", "Desconocido", "Análisis", "Comprobaciones",
-  "Respuesta", "Versión", "Version", "Nivel", "Recomendación", "Contexto",
-  "Evidencia", "Pruebas", "Observación", "Observaciones", "Conclusión",
-  "España", "Español", "KERNEL", "KENGINE", "WebLLM", "WebGPU", "TikTok",
-  "Instagram", "YouTube", "Facebook", "WhatsApp", "Telegram", "Discord",
-  "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo",
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto",
-  "Septiembre", "Octubre", "Noviembre", "Diciembre",
-  "Hecho", "Indicio", "Hipótesis", "Desconocidos", "Alternativa", "Alternativas",
-  "Comprobación", "Neutralidad", "Fidelidad", "Criterio", "Criterios",
-]);
 
 export function extractProperNameCandidates(text) {
   const t = String(text || "");
   const found = new Set();
+
+  // A candidate must be directly attributed an action or statement.
+  // This intentionally prefers missed edge cases over false positives such as
+  // "Recibí", "Reformulación" or headings at the start of a sentence.
   const re =
-    /(?:^|[\s«"'([{,;:])([A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}){0,2})(?=[\s,.;:!?)»\]}"]|$)/gm;
+    /(?:^|[\s«"'([{,;:])([A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}){0,2})(?=\s+(?:dice|afirma|sostiene|declara|asegura|reconoce|niega|cuenta|cont[oó]|explica|responde|escribe|env[ií]a|recibi[oó]|denuncia|relata|mantiene|admite|a[ñn]ade|se[ñn]ala|indica|confirma|alega|ofrece)\b)/gm;
   let m;
   while ((m = re.exec(t)) !== null) {
-    const full = m[1].trim();
-    const parts = full.split(/\s+/);
-    if (parts.every((p) => STOP_CAPS.has(p))) continue;
-    if (/^Versi[oó]n$/i.test(parts[0]) && parts.length <= 2) continue;
-    for (const p of parts) {
-      if (STOP_CAPS.has(p)) continue;
-      if (p.length < 2) continue;
-      found.add(p);
-    }
-    if (parts.length > 1 && !parts.every((p) => STOP_CAPS.has(p))) {
-      found.add(full);
-    }
+    const candidate = m[1].trim();
+    // Reject common role nouns that can precede a reporting verb.
+    if (/^(?:la persona|el usuario|la usuaria|el autor|la autora|el testigo|la testigo|una persona|alguien)$/i.test(candidate)) continue;
+    for (const part of candidate.split(/\s+/)) found.add(part);
+    if (candidate.includes(" ")) found.add(candidate);
   }
+
+  // Also recognize explicit attributions in compact formats: "Nombre: ...".
+  const labelRe = /(?:^|\n)\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]{1,}){0,2})\s*:\s*(?:afirma|dice|declara|sostiene|asegura)\b/gm;
+  while ((m = labelRe.exec(t)) !== null) {
+    const candidate = m[1].trim();
+    for (const part of candidate.split(/\s+/)) found.add(part);
+    if (candidate.includes(" ")) found.add(candidate);
+  }
+
   return [...found];
 }
 
@@ -135,7 +124,7 @@ export function validateCaseFidelity(userText, assistantText) {
   if (inventedNames.length) {
     issues.push({
       code: "invented_names",
-      detail: `Nombres no presentes en el enunciado: ${inventedNames.join(", ")}.`,
+      detail: `Posibles nombres propios no presentes en el enunciado: ${inventedNames.join(", ")}.`,
       names: inventedNames,
     });
   }
@@ -146,54 +135,39 @@ export function validateCaseFidelity(userText, assistantText) {
 }
 
 export function buildFidelityCorrection(userText, assistantText, validation) {
-  const lines = [];
-  lines.push(
-    "[Validación de fidelidad] La respuesta anterior no se ajusta del todo al enunciado:"
-  );
-  for (const iss of validation.issues) {
-    lines.push(`- ${iss.detail}`);
-  }
-  lines.push("");
-  lines.push(
-    "Reformulación mínima (solo lo que el enunciado permite afirmar con rigor):"
-  );
-  lines.push("Hechos: lo explícitamente confirmado en el enunciado (p. ej. existencia de un cargo u hora si se indica). Nada más.");
-  lines.push(
-    "Indicios / declaraciones: cada versión es una afirmación pendiente de verificación, no una prueba independiente."
-  );
-  lines.push(
-    "Desconocido: autoría, existencia real de grabaciones o testigos no examinados, y cualquier detalle no escrito en el caso."
-  );
-  lines.push(
-    "Comprobaciones: contrastar ambas versiones con registros verificables (si existen), sin presuponer quién tenía o usó el medio de acceso."
-  );
-  if (/tarjeta|registro|cuenta/i.test(userText || "")) {
-    lines.push(
-      "Conclusión: un medio de acceso (tarjeta/registro/cuenta) no demuestra por sí solo quién lo utilizó."
-    );
-  }
-  lines.push("");
-  lines.push(
-    "Nota: esta corrección es del validador de K.ENGINE, no una regeneración del modelo."
-  );
+  const lines = [
+    "[Validación de fidelidad] Se han detectado posibles problemas de fidelidad:",
+    ...validation.issues.map((iss) => `- ${iss.detail}`),
+    "",
+    "Se conserva la respuesta original para evitar sustituirla por una plantilla genérica no sustentada.",
+    "",
+    "Respuesta original:",
+    String(assistantText || ""),
+    "",
+    "Nota: esta advertencia procede del validador de K.ENGINE; no es una regeneración del modelo.",
+  ];
   return lines.join("\n");
 }
 
 export function applyCaseFidelityGuard(raw, userText) {
-  const validation = validateCaseFidelity(userText, raw);
+  const u = String(userText || "");
+  const analyticalSignals =
+    /versi[oó]n|hechos|indicios|hip[oó]tesis|tarjeta|prueba|evidencia|analiza|contradic|testigo|c[aá]mara|grabaci[oó]n|declaraci[oó]n|investigaci[oó]n|corrobor|autor[ií]a|denuncia|grooming/i.test(
+      u
+    );
+
+  // Do not run a case-analysis correction on every long user message.
+  if (!analyticalSignals) {
+    return { text: raw, fidelity: { ok: true, issues: [], skipped: true } };
+  }
+
+  const validation = validateCaseFidelity(u, raw);
   if (validation.ok) {
     return { text: raw, fidelity: { ok: true, issues: [] } };
   }
-  const u = String(userText || "");
-  const looksAnalytical =
-    /versi[oó]n|hechos|indicios|hip[oó]tesis|tarjeta|prueba|evidencia|analiza|contradic/i.test(
-      u
-    ) || u.length > 120;
-  if (!looksAnalytical) {
-    return { text: raw, fidelity: { ok: true, issues: [], skipped: true } };
-  }
+
   return {
-    text: buildFidelityCorrection(userText, raw, validation),
-    fidelity: { ok: false, issues: validation.issues, corrected: true },
+    text: buildFidelityCorrection(u, raw, validation),
+    fidelity: { ok: false, issues: validation.issues, corrected: true, preservedOriginal: true },
   };
 }

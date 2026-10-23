@@ -48,6 +48,8 @@ assert(v.issues.length >= 2, `multiple issues: ${v.issues.length}`);
 const applied = applyCaseFidelityGuard(badAna, CASE);
 assert(applied.fidelity.ok === false, "fidelity not ok");
 assert(/Validación de fidelidad/i.test(applied.text), "warning present");
+assert(applied.text.includes(badAna), "preserves original model response");
+assert(!/medio de acceso|tarjeta\/registro\/cuenta/i.test(applied.text), "does not inject generic access-card template");
 
 const good = `Hechos: existe un cargo con esa tarjeta a las 18:40.
 
@@ -76,6 +78,16 @@ assert(validateCaseFidelity(simpleUser, simpleAsst).ok === true, "simple case ok
 const withName = "María dice que no fue ella. Pedro dice lo contrario. Sin pruebas.";
 const withNameAsst = "Hechos: no hay pruebas independientes. María y Pedro ofrecen versiones opuestas sin corroborar.";
 assert(validateCaseFidelity(withName, withNameAsst).ok === true, "names in user allowed");
+
+// Regression: sentence starts and headings are not names by themselves.
+const contaminatedLookingText = `Recibí el mensaje a las 17:45.
+Reformulación mínima: los datos no bastan para determinar la autoría.`;
+assert(findInventedNames(CASE, contaminatedLookingText).length === 0, "does not flag 'Recibí' or 'Reformulación' as names");
+
+const unrelatedLongPrompt = "Escribe una historia de fantasía con dragones, castillos, tormentas y una ciudad perdida. ".repeat(4);
+const unrelatedLongAnswer = "Había una vez una ciudad perdida bajo una montaña, donde los dragones custodiaban un castillo.";
+const skippedLong = applyCaseFidelityGuard(unrelatedLongAnswer, unrelatedLongPrompt);
+assert(skippedLong.text === unrelatedLongAnswer && skippedLong.fidelity.skipped, "long unrelated prompt skips case-fidelity correction");
 
 console.log(failed === 0 ? "\nALL evidenceFidelity tests PASSED" : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
