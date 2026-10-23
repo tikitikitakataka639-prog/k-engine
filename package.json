@@ -14,13 +14,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
-    "test": "node tests/server.test.js && node tests/cache-errors.test.js && node tests/mathTools.test.js && node tests/mathOverride.test.js && node tests/intelligenceCore.test.js && node tests/denunciaKnowledge.test.js && node tests/slm-eval.harness.js",
+    "test": "node tests/server.test.js && node tests/cache-errors.test.js && node tests/mathTools.test.js && node tests/mathOverride.test.js && node tests/intelligenceCore.test.js && node tests/denunciaKnowledge.test.js && node tests/genMetrics.test.js && node tests/slm-eval.harness.js",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "test:cache": "node tests/cache-errors.test.js",
     "test:math": "node tests/mathTools.test.js && node tests/mathOverride.test.js",
     "test:intel": "node tests/intelligenceCore.test.js",
-    "test:slm": "node tests/slm-eval.harness.js"
+    "test:slm": "node tests/slm-eval.harness.js",
+    "test:metrics": "node tests/genMetrics.test.js"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.1.0",
