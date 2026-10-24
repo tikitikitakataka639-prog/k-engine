@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { injectPersonality, finalizeAssistantText } from "./personalityInjector";
+import { formatMetricsForUi } from "./genMetrics.js";
 import { postToKernel, isAllowedKernelOrigin, BRIDGE_PROTOCOL } from "./kernelBridge";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
@@ -131,7 +132,7 @@ export function EngineProvider({ children }) {
     () =>
       modelManager.onMessage((d) => {
         const KE = keRef.current;
-        if (d.type === "genstart" && d.id === KE.labGenId) setGenerating(true);
+        if (d.type === "genstart" && d.id === KE.labGenId) { setGenerating(true); setMetrics(emptyMetrics()); }
         else if (d.type === "token" && d.id === KE.labGenId) {
           setMessages((prev) => {
             const next = prev.slice();
@@ -141,12 +142,13 @@ export function EngineProvider({ children }) {
             return next;
           });
         } else if (d.type === "usage" && d.id === KE.labGenId) {
-          setMetrics((m) => ({
-            tokens: d.completionTokens != null ? String(d.completionTokens) : m.tokens,
-            genTime: d.genMs != null ? (d.genMs / 1000).toFixed(1) + " s" : m.genTime,
-            firstTok: d.firstTokenMs != null ? d.firstTokenMs + " ms" : m.firstTok,
-            tps: d.tps != null ? String(d.tps) : m.tps,
-          }));
+          const formatted = formatMetricsForUi(d);
+          setMetrics({
+            tokens: formatted.tokens,
+            tps: formatted.tps,
+            genTime: formatted.genTime,
+            firstTok: formatted.firstTok,
+          });
         } else if (d.type === "gendone" && d.id === KE.labGenId) {
           setGenerating(false);
           KE.labGenId = null;
