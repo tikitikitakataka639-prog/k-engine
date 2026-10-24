@@ -4,6 +4,7 @@
 // Ciclo de vida de modelos:
 //   CÓDIGO (modelRegistry) → DESCARGAR → Cache del navegador → FORMATEAR → solo código de nuevo.
 import { prebuiltAppConfig, CreateMLCEngine } from "@mlc-ai/web-llm";
+import { computeGenMetrics } from "../engine/genMetrics.js";
 import { buildKernelAppConfig, KERNEL_MODEL_IDS } from "../engine/modelRegistry.js";
 
 let engine = null;
@@ -388,6 +389,7 @@ self.onmessage = async (e) => {
       self.postMessage({ type: "genstart", id: msg.id });
       const t0 = performance.now();
       let firstTokenMs = null;
+      let finalUsage = null;
       const chunks = await engine.chat.completions.create({
         messages: msg.messages,
         // Respecta el perfil definido por modelo en genConfig.js.
@@ -398,25 +400,33 @@ self.onmessage = async (e) => {
         stream_options: { include_usage: true },
       });
       for await (const chunk of chunks) {
-        const delta = chunk.choices[0]?.delta?.content || "";
+        const delta = chunk.choices?.[0]?.delta?.content || "";
         if (delta) {
           if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
           self.postMessage({ type: "token", id: msg.id, delta });
         }
-        if (chunk.usage) {
-          self.postMessage({
-            type: "usage",
-            id: msg.id,
-            completionTokens: chunk.usage.completion_tokens,
-            genMs: Math.round(performance.now() - t0),
-            firstTokenMs,
-            tps:
-              chunk.usage.completion_tokens && chunk.choices[0]?.finish_reason
-                ? +(chunk.usage.completion_tokens / ((performance.now() - t0) / 1000)).toFixed(1)
-                : null,
-          });
+        // WebLLM puede enviar usage en un chunk final sin choices; conservarlo
+        // y publicar las métricas una sola vez, al terminar el stream.
+        if (chunk.usage && Number.isFinite(Number(chunk.usage.completion_tokens))) {
+          finalUsage = chunk.usage;
         }
       }
+      const genMs = Math.round(performance.now() - t0);
+      const metrics = computeGenMetrics({
+        completionTokens: finalUsage?.completion_tokens ?? null,
+        genMs,
+        firstTokenMs,
+      });
+      self.postMessage({
+        type: "usage",
+        id: msg.id,
+        completionTokens: metrics.tokens,
+        genMs: metrics.genMs,
+        firstTokenMs: metrics.firstTokenMs,
+        tps: metrics.decodeTps ?? metrics.overallTps,
+        overallTps: metrics.overallTps,
+        decodeTps: metrics.decodeTps,
+      });
       generating = false;
       self.postMessage({ type: "gendone", id: msg.id });
     } else if (msg.type === "diagnose") {
