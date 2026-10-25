@@ -19,6 +19,20 @@ export function ModelCard({ model }) {
   const working = ["DOWNLOADING", "LOADING", "VERIFYING", "UNLOADING", "DELETING"].includes(m.status);
   const hardBlock = cls && cls.level === "NO COMPATIBLE";
   const lastDelete = formatResult && formatResult.id === model.id ? formatResult : null;
+  // Pack oficial MLC en Hugging Face (pesos ~1–2 GB). No está en el repo de K.ENGINE.
+  const hfSlug =
+    model.hf && String(model.hf).trim()
+      ? String(model.hf).replace(/^https?:\/\/huggingface\.co\//, "").replace(/\/+$/, "")
+      : model.id === "Llama-3.2-3B-Instruct-q4f16_1-MLC"
+        ? "mlc-ai/Llama-3.2-3B-Instruct-q4f16_1-MLC"
+        : model.id === "Llama-3.2-1B-Instruct-q4f16_1-MLC"
+          ? "mlc-ai/Llama-3.2-1B-Instruct-q4f16_1-MLC"
+          : model.id === "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
+            ? "mlc-ai/Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
+            : model.id === "Qwen2.5-1.5B-Instruct-q4f16_1-MLC"
+              ? "mlc-ai/Qwen2.5-1.5B-Instruct-q4f16_1-MLC"
+              : null;
+  const hfPackUrl = hfSlug ? `https://huggingface.co/${hfSlug}/tree/main` : null;
 
   let mainLabel;
   if (!started) mainLabel = "INICIA EL MOTOR";
@@ -129,6 +143,18 @@ export function ModelCard({ model }) {
               Liberar memoria
             </button>
           </>
+        ) : null}
+        {hfPackUrl ? (
+          <a
+            data-testid="model-hf-download-btn"
+            href={hfPackUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center border border-sky-500/50 text-sky-300 font-mono text-xs uppercase px-3 py-2 rounded-md hover:bg-sky-500/10 transition"
+            title="Abre el pack oficial MLC en Hugging Face (archivos listos para descargar)"
+          >
+            Descargar pack HF
+          </a>
         ) : null}
       </div>
 
