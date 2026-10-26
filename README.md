@@ -126,6 +126,10 @@ npm run build && npm run test:e2e   # UI en Chromium (Playwright)
 
 El worker solicita `completion_tokens` al final del stream de WebLLM y mide localmente el tiempo total y el tiempo hasta el primer token. Si WebLLM no entrega `usage`, el número de tokens y las velocidades (tokens/s) se muestran como `N/A`; no se estiman a partir del texto. Los tiempos medidos siguen disponibles, y un tiempo hasta el primer token no observado también aparece como `N/A`.
 
+## Herramientas locales
+
+K.ENGINE ofrece cálculo determinista y lectura local de archivos de texto seleccionados por el usuario mediante un ciclo JSON validado. La búsqueda web y las operaciones de Windows no están disponibles mientras KERNEL no proporcione un puente de búsqueda y no haya un conector Tauri instalado. Consulta [la arquitectura, límites y validación de herramientas](docs/TOOL-EXECUTION.md).
+
 ## Limitaciones reales
 
 - No se afirma que el error `Cache.add() encountered a network error` esté solucionado: el diagnóstico se conserva; la causa real sigue sin determinar hasta ejecutarlo en un navegador con WebGPU y red.

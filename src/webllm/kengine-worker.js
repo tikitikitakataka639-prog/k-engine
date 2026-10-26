@@ -6,11 +6,14 @@
 import { prebuiltAppConfig, CreateMLCEngine } from "@mlc-ai/web-llm";
 import { computeGenMetrics } from "../engine/genMetrics.js";
 import { buildKernelAppConfig, KERNEL_MODEL_IDS } from "../engine/modelRegistry.js";
+import { executeLocalTool, getAvailableTools, runToolLoop } from "../engine/toolCalling.js";
 
 let engine = null;
 let loadedModel = null;
 let generating = false;
 let loading = false;
+let cancelRequested = false;
+let generationController = null;
 
 // AppConfig KERNEL: solo los 4 modelos del registro + overrides de contexto.
 const { appConfig: KERNEL_APP_CONFIG, missing: KERNEL_MISSING } = buildKernelAppConfig(prebuiltAppConfig);
@@ -386,35 +389,73 @@ self.onmessage = async (e) => {
         return;
       }
       generating = true;
+      cancelRequested = false;
+      generationController = new AbortController();
       self.postMessage({ type: "genstart", id: msg.id });
       const t0 = performance.now();
       let firstTokenMs = null;
-      let finalUsage = null;
-      const chunks = await engine.chat.completions.create({
+      let totalGenMs = 0;
+      let totalTokens = 0;
+      let usageMissing = false;
+      const tools = getAvailableTools(msg.attachment);
+      const loop = await runToolLoop({
         messages: msg.messages,
-        // Respecta el perfil definido por modelo en genConfig.js.
-        temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.6,
-        top_p: Number.isFinite(Number(msg.top_p)) ? Number(msg.top_p) : 0.9,
-        max_tokens: Number.isFinite(Number(msg.max_tokens)) ? Math.max(1, Number(msg.max_tokens)) : 512,
-        stream: true,
-        stream_options: { include_usage: true },
+        tools,
+        signal: generationController.signal,
+        shouldCancel: () => cancelRequested,
+        onToolEvent: (event) => {
+          if (event.type === "tool_start") {
+            self.postMessage({ type: "tool_start", id: msg.id, name: event.name, arguments: event.arguments });
+          } else {
+            const result = event.result;
+            const summary = result.ok
+              ? event.name === "calculate"
+                ? `${result.expression} = ${result.value}`
+                : `Leído ${result.fileName} (${result.characters} caracteres): ${result.text.slice(0, 300)}${result.text.length > 300 ? "…" : ""}`
+              : `Error: ${result.error}`;
+            self.postMessage({ type: "tool_result", id: msg.id, name: event.name, ok: result.ok, summary });
+          }
+        },
+        executeTool: (name, args) => executeLocalTool(name, args, msg.attachment),
+        callModel: async (messages) => {
+          if (cancelRequested) throw new Error("Generación cancelada.");
+          const callStarted = performance.now();
+          let raw = "";
+          let callUsage = null;
+          const chunks = await engine.chat.completions.create({
+            messages,
+            temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.6,
+            top_p: Number.isFinite(Number(msg.top_p)) ? Number(msg.top_p) : 0.9,
+            max_tokens: Number.isFinite(Number(msg.max_tokens)) ? Math.max(1, Number(msg.max_tokens)) : 512,
+            response_format: { type: "json_object" },
+            stream: true,
+            stream_options: { include_usage: true },
+          });
+          for await (const chunk of chunks) {
+            if (cancelRequested) {
+              engine.interruptGenerate();
+              throw new Error("Generación cancelada.");
+            }
+            const delta = chunk.choices?.[0]?.delta?.content || "";
+            if (delta) {
+              raw += delta;
+              if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
+            }
+            if (chunk.usage && Number.isFinite(Number(chunk.usage.completion_tokens))) {
+              callUsage = Number(chunk.usage.completion_tokens);
+            }
+          }
+          totalGenMs += performance.now() - callStarted;
+          if (callUsage === null) usageMissing = true;
+          else totalTokens += callUsage;
+          return raw;
+        },
       });
-      for await (const chunk of chunks) {
-        const delta = chunk.choices?.[0]?.delta?.content || "";
-        if (delta) {
-          if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
-          self.postMessage({ type: "token", id: msg.id, delta });
-        }
-        // WebLLM puede enviar usage en un chunk final sin choices; conservarlo
-        // y publicar las métricas una sola vez, al terminar el stream.
-        if (chunk.usage && Number.isFinite(Number(chunk.usage.completion_tokens))) {
-          finalUsage = chunk.usage;
-        }
-      }
-      const genMs = Math.round(performance.now() - t0);
+      if (cancelRequested) throw new Error("Generación cancelada.");
+      self.postMessage({ type: "token", id: msg.id, delta: loop.text });
       const metrics = computeGenMetrics({
-        completionTokens: finalUsage?.completion_tokens ?? null,
-        genMs,
+        completionTokens: usageMissing ? null : totalTokens,
+        genMs: Math.round(totalGenMs),
         firstTokenMs,
       });
       self.postMessage({
@@ -428,6 +469,7 @@ self.onmessage = async (e) => {
         decodeTps: metrics.decodeTps,
       });
       generating = false;
+      generationController = null;
       self.postMessage({ type: "gendone", id: msg.id });
     } else if (msg.type === "diagnose") {
       const rec = getWebLLMModel(msg.model);
@@ -457,7 +499,11 @@ self.onmessage = async (e) => {
         .map((e) => ({ name: e.name, status: e.responseStatus ?? null, transferSize: e.transferSize, ms: Math.round(e.duration) }));
       self.postMessage({ type: "diag_done", model: rec.model_id, lastResources: last });
     } else if (msg.type === "cancel") {
-      if (engine) engine.interruptGenerate();
+      if (generating) {
+        cancelRequested = true;
+        generationController?.abort();
+        if (engine) engine.interruptGenerate();
+      }
     } else if (msg.type === "unload") {
       // Liberar GPU/RAM; los pesos pueden seguir en Cache Storage del navegador.
       if (generating) {
@@ -473,7 +519,13 @@ self.onmessage = async (e) => {
       }
     }
   } catch (err) {
+    const cancelled = cancelRequested || String((err && err.message) || err).toLowerCase().includes("cancel");
     generating = false;
+    generationController = null;
+    if (cancelled) {
+      self.postMessage({ type: "cancelled", id: msg.id });
+      return;
+    }
     const message = String((err && err.message) || err);
     console.error("[WebLLM] Error del worker:", err);
     self.postMessage({ type: "error", scope: msg.type || "unknown", message });

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { injectPersonality, finalizeAssistantText } from "./personalityInjector";
 import { formatMetricsForUi } from "./genMetrics.js";
+import { getAvailableTools, validateTextAttachment } from "./toolCalling.js";
 import { postToKernel, isAllowedKernelOrigin, BRIDGE_PROTOCOL } from "./kernelBridge";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
@@ -56,6 +57,7 @@ export function EngineProvider({ children }) {
   const [labError, setLabError] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [metrics, setMetrics] = useState(emptyMetrics);
+  const [toolActivity, setToolActivity] = useState([]);
   const [control, setControl] = useState(emptyControl);
   const [apiState, setApiState] = useState({ ok: false, version: null });
 
@@ -133,6 +135,32 @@ export function EngineProvider({ children }) {
       modelManager.onMessage((d) => {
         const KE = keRef.current;
         if (d.type === "genstart" && d.id === KE.labGenId) { setGenerating(true); setMetrics(emptyMetrics()); }
+        else if (d.type === "tool_start" && d.id === KE.labGenId) {
+          setToolActivity((prev) => [...prev, { name: d.name, status: "running", summary: "Ejecutando en este dispositivo…" }]);
+        } else if (d.type === "tool_result" && d.id === KE.labGenId) {
+          setToolActivity((prev) => {
+            const next = prev.slice();
+            const last = next.length - 1;
+            if (last >= 0) next[last] = { name: d.name, status: d.ok ? "done" : "error", summary: d.summary };
+            return next;
+          });
+        } else if (d.type === "cancelled" && d.id === KE.labGenId) {
+          setGenerating(false);
+          KE.labGenId = null;
+          KE.lastUserText = "";
+          KE.lastMath = null;
+          KE.toolMode = false;
+          setMessages((prev) => prev.map((m) => (m.streaming ? { role: m.role, content: m.content } : m)));
+          if (KE.bridgeRequestId) {
+            const requestId = KE.bridgeRequestId;
+            KE.bridgeRequestId = null;
+            try {
+              if (window.opener && !window.opener.closed) {
+                postToKernel(window.opener, { type: BRIDGE_PROTOCOL.error, requestId, error: "Generación cancelada.", code: "cancelled" });
+              }
+            } catch {}
+          }
+        }
         else if (d.type === "token" && d.id === KE.labGenId) {
           setMessages((prev) => {
             const next = prev.slice();
@@ -159,7 +187,7 @@ export function EngineProvider({ children }) {
           setMessages((prev) => {
             const next = prev.map((m) => {
               if (m.streaming || (m.role === "assistant" && m === prev[prev.length - 1])) {
-                return { role: m.role, content: finalizeAssistantText(m.content, finalUserText, { math: finalMath?.hit ? finalMath : null }) };
+                return { role: m.role, content: finalizeAssistantText(m.content, finalUserText, { math: finalMath?.hit ? finalMath : null, disableMath: KE.toolMode }) };
               }
               return m.streaming ? { role: m.role, content: m.content } : m;
             });
@@ -200,13 +228,22 @@ export function EngineProvider({ children }) {
     [],
   );
 
-  const sendChat = useCallback((text) => {
+  const sendChat = useCallback((text, attachment = null) => {
     const trimmed = text.trim();
     const m = mmRef.current;
     const id = m.loadedId;
     if (!trimmed || !id || m.models[id]?.status !== "READY" || keRef.current.job) return false;
+    if (attachment) {
+      const checked = validateTextAttachment(attachment);
+      if (!checked.ok) {
+        setLabError(checked.error);
+        return false;
+      }
+      attachment = checked.attachment;
+    }
     const history = [...messagesRef.current, { role: "user", content: trimmed }];
     setMessages(history);
+    setToolActivity([]);
     setLabError(null);
     const genId = Date.now();
     keRef.current.labGenId = genId;
@@ -216,9 +253,11 @@ export function EngineProvider({ children }) {
       modelId: id,
       contextWindow,
       history: history.map(({ role, content }) => ({ role, content })),
+      availableTools: getAvailableTools(attachment),
     });
     keRef.current.lastUserText = trimmed;
     keRef.current.lastMath = injected.math || null;
+    keRef.current.toolMode = injected.toolMode;
     modelManager.generate({
       id: genId,
       model: id,
@@ -226,6 +265,7 @@ export function EngineProvider({ children }) {
       max_tokens: injected.maxTokens,
       temperature: injected.temperature,
       top_p: injected.top_p,
+      attachment,
     });
     return true;
   }, []);
@@ -284,6 +324,7 @@ export function EngineProvider({ children }) {
   const cancelGenerate = useCallback(() => modelManager.cancelGenerate(), []);
   const resetChat = useCallback(() => {
     setMessages([]);
+    setToolActivity([]);
     setLabError(null);
     if (mmRef.current.loadedId) clearChat(mmRef.current.loadedId);
   }, []);
@@ -436,6 +477,7 @@ export function EngineProvider({ children }) {
       saveKernelUrl,
       clearKernelUrl,
       messages,
+      toolActivity,
       sendChat,
       cancelGenerate,
       resetChat,
@@ -453,7 +495,7 @@ export function EngineProvider({ children }) {
       statusLines,
       CLASS,
     }),
-    [mm, loadedId, classes, cls, selectModel, download, cancelDownload, unload, deleteModel, formatResult, startPhase, startError, startEngine, hardware, manualVram, setManualVram, kernelUrl, kernelUrlError, saveKernelUrl, clearKernelUrl, messages, sendChat, cancelGenerate, resetChat, labError, generating, metrics, control, patchControl, saveConfig, testConfig, refreshCache, runDiagnosis, statusLines],
+    [mm, loadedId, classes, cls, selectModel, download, cancelDownload, unload, deleteModel, formatResult, startPhase, startError, startEngine, hardware, manualVram, setManualVram, kernelUrl, kernelUrlError, saveKernelUrl, clearKernelUrl, messages, toolActivity, sendChat, cancelGenerate, resetChat, labError, generating, metrics, control, patchControl, saveConfig, testConfig, refreshCache, runDiagnosis, statusLines],
   );
 
   return <EngineContext.Provider value={value}>{children}</EngineContext.Provider>;

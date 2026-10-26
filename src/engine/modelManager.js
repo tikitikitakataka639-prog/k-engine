@@ -176,6 +176,9 @@ class ModelManager {
       case "gendone":
         if (id) this.#patchModel(id, { status: "READY" });
         break;
+      case "cancelled":
+        if (id) this.#patchModel(id, { status: "READY" });
+        break;
       case "unloaded":
         if (this.op && this.op.kind === "unload") {
           const mid = this.op.id;
