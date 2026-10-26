@@ -28,11 +28,11 @@ const LAYERS = [
   },
   {
     n: "Capa 06",
-    title: "ToolRouter (preparado)",
+    title: "Herramientas locales",
     body: (
       <>
-        web_search, browser, vision, system y windows_connector quedan declarados pero <strong className="text-amber2">desactivados</strong>. Sin ejecución de
-        comandos, sin acceso al PC.
+        WebLLM decide con salida JSON validada. Hoy funcionan el cálculo local y la lectura de archivos de texto adjuntados por el usuario. Búsqueda web y acciones de
+        Windows no están disponibles: este repositorio no incluye el conector local.
       </>
     ),
   },

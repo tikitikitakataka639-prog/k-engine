@@ -1,8 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
 // E2E_BASE_URL: URL de una instancia ya levantada (p. ej. http://app:8080 en docker compose).
-// Si no se define, Playwright arranca `npm run dev` por su cuenta.
-const baseURL = process.env.E2E_BASE_URL || "http://127.0.0.1:8080";
+// Si no se define, Playwright arranca el servidor sin depender del shim `npm` de Windows.
+const baseURL = process.env.E2E_BASE_URL || "http://localhost:8080";
 export default defineConfig({
   testDir: "tests/e2e",
   timeout: 60_000,
@@ -17,5 +17,5 @@ export default defineConfig({
   },
   webServer: process.env.E2E_BASE_URL
     ? undefined
-    : { command: "npm run dev", url: baseURL, reuseExistingServer: true, timeout: 120_000 },
+    : { command: "node scripts/dev-all.mjs", url: baseURL, reuseExistingServer: true, timeout: 120_000 },
 });

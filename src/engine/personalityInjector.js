@@ -12,6 +12,7 @@ import { buildDenunciaKnowledgeContext } from "./denunciaKnowledge.js";
 import { buildFitMessages } from "./chatContext.js";
 import { getGenConfig } from "./genConfig.js";
 import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT, KERNEL_3B_FEWSHOT } from "./modelProfiles.js";
+import { buildToolProtocolContext } from "./toolCalling.js";
 import { trySolveMath, mathContextNote } from "./mathTools.js";
 import { guardAssistantOutput } from "./outputGuard.js";
 import {
@@ -26,6 +27,7 @@ export function injectPersonality({
   history,
   maxTokens,
   includeFewShot,
+  availableTools = [],
 }) {
   const ctx = Number(contextWindow) || 4096;
   const profile = getModelProfile(modelId);
@@ -35,7 +37,8 @@ export function injectPersonality({
   const hist = Array.isArray(history) ? history : [];
   const lastUser = [...hist].reverse().find((m) => m.role === "user")?.content || "";
 
-  const math = trySolveMath(lastUser);
+  const toolMode = availableTools.some((tool) => tool.name === "calculate");
+  const math = toolMode ? { hit: false } : trySolveMath(lastUser);
   const mathNote = math.hit ? mathContextNote(math) : "";
   const pre = runPreInference(lastUser);
   const baseSystem = (systemPrompt || getSystemPrompt(modelId, ctx)).trim();
@@ -49,9 +52,13 @@ export function injectPersonality({
     pre.contextBlock,
   ].filter((part) => typeof part === "string" && part.trim());
 
-  // El núcleo compacto va antes del prompt de personalidad variable:
-  // buildFitMessages recorta por el final y así conserva método e identidad.
-  const systemParts = [...priorityContext, KERNEL_BRAIN, baseSystem];
+  // buildFitMessages recorta el system por el final. El protocolo activo debe sobrevivir
+  // a contextos analíticos extensos y a los prompts largos de los modelos pequeños.
+  const toolContext = buildToolProtocolContext(availableTools);
+  const systemParts = [];
+  if (toolContext) systemParts.push(toolContext);
+  systemParts.push(...priorityContext);
+  systemParts.push(KERNEL_BRAIN, baseSystem);
   if (profile.useSlmBlock) systemParts.push(SLM_REASONING_BLOCK);
   const system = systemParts.join("\n\n");
 
@@ -85,6 +92,7 @@ export function injectPersonality({
     temperature: gen.temperature,
     top_p: gen.top_p,
     math,
+    toolMode,
     profile,
     intelligence: {
       evidence: pre.evidence,
@@ -104,7 +112,7 @@ export function finalizeAssistantText(raw, userText, opts = {}) {
   }
 
   let math = opts.math || null;
-  if (!math?.hit && userText) {
+  if (!opts.disableMath && !math?.hit && userText) {
     const resolved = trySolveMath(userText);
     if (resolved.hit) math = resolved;
   }

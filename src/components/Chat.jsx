@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useEngine } from "../engine/EngineProvider";
+import { MAX_ATTACHMENT_BYTES, validateTextAttachment } from "../engine/toolCalling.js";
 
 export function Chat() {
-  const { messages, loadedId, selectedId, models, labError, sendChat, chatReady, resetChat, generating } = useEngine();
+  const { messages, toolActivity, loadedId, selectedId, models, labError, sendChat, chatReady, resetChat, generating } = useEngine();
   const labStatus = (loadedId && models[loadedId]?.status) || "OFFLINE";
   const [text, setText] = useState("");
+  const [attachment, setAttachment] = useState(null);
+  const [attachmentError, setAttachmentError] = useState("");
+  const fileInputRef = useRef(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -57,15 +61,74 @@ export function Chat() {
               </div>
             </div>
           ))}
+          {toolActivity.map((tool, i) => (
+            <div key={`${tool.name}-${i}`} className="border border-ink-600 rounded-md px-3 py-2 text-xs text-slate-300" data-testid="tool-activity">
+              <span className="text-volt">{tool.name}</span>
+              <span className="mx-2 text-slate-500">{tool.status === "running" ? "en curso" : tool.status === "done" ? "completada" : "fallida"}</span>
+              <span className="whitespace-pre-wrap break-words">{tool.summary}</span>
+            </div>
+          ))}
         </div>
         <form
           id="labForm"
-          className="border-t border-ink-700 bg-ink-800 p-4 flex gap-3"
-          onSubmit={(e) => {
+          className="border-t border-ink-700 bg-ink-800 p-4 flex flex-wrap gap-3"
+          onSubmit={async (e) => {
             e.preventDefault();
-            if (sendChat(text)) setText("");
+            let selectedAttachment = null;
+            if (attachment) {
+              try {
+                const checked = validateTextAttachment({ name: attachment.name, text: await attachment.text() });
+                if (!checked.ok) {
+                  setAttachmentError(checked.error);
+                  return;
+                }
+                selectedAttachment = checked.attachment;
+              } catch (error) {
+                setAttachmentError(`No se pudo leer el archivo local: ${String(error?.message || error)}`);
+                return;
+              }
+            }
+            if (sendChat(text, selectedAttachment)) {
+              setText("");
+              setAttachment(null);
+              setAttachmentError("");
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }
           }}
         >
+          <div className="w-full flex items-center gap-2 text-xs text-slate-400">
+            <button type="button" className="underline hover:text-white disabled:opacity-40" disabled={!chatReady} onClick={() => fileInputRef.current?.click()}>
+              Adjuntar TXT/MD/CSV/JSON/LOG (solo local)
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.md,.csv,.json,.log,text/plain,text/csv,application/json"
+              className="hidden"
+              data-testid="local-file-input"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                setAttachment(file);
+                setAttachmentError("");
+                if (!file) return;
+                if (file.size > MAX_ATTACHMENT_BYTES) {
+                  setAttachmentError(`El archivo supera el límite de ${MAX_ATTACHMENT_BYTES} bytes.`);
+                  setAttachment(null);
+                  e.target.value = "";
+                } else if (!validateTextAttachment({ name: file.name, text: "" }).ok) {
+                  setAttachmentError("Formato no admitido. Adjunta TXT, MD, CSV, JSON o LOG.");
+                  setAttachment(null);
+                  e.target.value = "";
+                } else if (file.name.length > 180) {
+                  setAttachmentError("El nombre del archivo supera el límite permitido.");
+                  setAttachment(null);
+                  e.target.value = "";
+                }
+              }}
+            />
+            {attachment ? <span className="truncate">{attachment.name} · {attachment.size} bytes</span> : null}
+            {attachmentError ? <span role="alert" className="text-red2">{attachmentError}</span> : null}
+          </div>
           <input
             id="labInput"
             type="text"
