@@ -11,7 +11,7 @@ assert.equal(normal.temperature, getGenConfig(model).temperature, "usa temperatu
 assert.equal(normal.top_p, getGenConfig(model).top_p, "usa top_p configurado");
 
 const fewShot = injectPersonality({ modelId: model, contextWindow: 4096, history, includeFewShot: true });
-assert(fewShot.messages.some(m => m.content.includes("Solicitud de reunión")), "includeFewShot inserta ejemplos reales");
+assert(fewShot.messages.some(m => m.content.includes("Elimina duplicados")), "includeFewShot inserta ejemplos reales");
 assert.equal(fewShot.messages.at(-1).content, history[0].content, "los ejemplos no desplazan la petición actual");
 
 const original = "Lo siento, pero no puedo ayudar con eso. Sin embargo, puedo explicar la ley aplicable.";

@@ -4,6 +4,7 @@
 // (descarga ~0,7 GB desde Hugging Face).
 import { test, expect } from "@playwright/test";
 import { KERNEL_PERSONALITY } from "../../src/engine/personality.js";
+import { DEFAULT_MODEL_ID } from "../../src/engine/modelRegistry.js";
 
 const LLAMA = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
 const card = (page, id = LLAMA) => page.locator(`[data-testid=model-card][data-model-id="${id}"]`);
@@ -43,8 +44,8 @@ test.describe("arranque", () => {
     const ids = await page.locator("[data-testid=model-card]").evaluateAll((els) => els.map((e) => e.dataset.modelId));
     expect(ids).toEqual([LLAMA, "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", "Llama-3.2-3B-Instruct-q4f16_1-MLC"]);
     expect(ids.join()).not.toMatch(/llava/i);
-    const all = await page.getByTestId("any-model-select").locator("option").count();
-    expect(all).toBeGreaterThan(20); // lista real de prebuiltAppConfig.model_list
+    const configured = await page.getByTestId("any-model-select").locator("option").count();
+    expect(configured).toBe(4); // solo los modelos configurados para KERNEL
   });
 
   test("las descargas están bloqueadas hasta INICIAR MOTOR", async ({ page }) => {
@@ -188,16 +189,16 @@ test.describe("laboratorio", () => {
   test("sin modelo READY el chat está bloqueado y se indica el modelo", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("#labInput")).toBeDisabled();
-    await expect(page.getByTestId("lab-model-id")).toHaveText(LLAMA);
+    await expect(page.getByTestId("lab-model-id")).toHaveText(DEFAULT_MODEL_ID);
     await expect(page.getByTestId("lab-chat")).toContainText("PERSONALITY: KERNEL");
   });
 
   test("personalidad de KERNEL: voz, rigor y brújula presentes", () => {
-    const p = KERNEL_PERSONALITY.systemPrompt;
-    for (const s of ["España", "joder", "Estoy jodido, así que no dejaré que el resto se jodan", "HECHOS", "INDICIOS", "HIPÓTESIS", "OPINIÓN", "BOE", "Te equivocas", "Me equivoqué", "Vale, esto ya es serio"]) {
+    const p = KERNEL_PERSONALITY.systemPrompt3B;
+    for (const s of ["Español de España", "HECHOS:", "INDICIOS:", "HIPÓTESIS:", "DESCONOCIDO:", "No inventes", "sin corroboración"]) {
       expect(p).toContain(s);
     }
-    expect(p).toMatch(/Nunca empieces con "¡Hola!/);
+    expect(p).toContain("Estoy jodido, así que no dejaré que el resto se jodan");
   });
 
   test("@gpu flujo completo con modelo real: descargar → READY → chat → liberar → formatear", async ({ page }) => {

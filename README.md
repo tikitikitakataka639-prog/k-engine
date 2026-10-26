@@ -119,8 +119,12 @@ Modelo prioritario: `mlc-ai/Llama-3.2-1B-Instruct-q4f16_1-MLC` (ID de API `llama
 
 ```bash
 npm test                  # servidor con proveedor y navegador simulados
-npm run build && python3 tests/ui.test.py   # UI en Chromium headless (Playwright)
+npm run build && npm run test:e2e   # UI en Chromium (Playwright)
 ```
+
+## Métricas de generación
+
+El worker solicita `completion_tokens` al final del stream de WebLLM y mide localmente el tiempo total y el tiempo hasta el primer token. Si WebLLM no entrega `usage`, el número de tokens y las velocidades (tokens/s) se muestran como `N/A`; no se estiman a partir del texto. Los tiempos medidos siguen disponibles, y un tiempo hasta el primer token no observado también aparece como `N/A`.
 
 ## Limitaciones reales
 

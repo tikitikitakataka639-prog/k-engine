@@ -20,6 +20,23 @@ assert(b.decodeTps === 10, "decode falls back to overall");
 const c = computeGenMetrics({});
 assert(c.tokens === null && c.overallTps === null, "empty stays null");
 
+const missingUsage = computeGenMetrics({ completionTokens: null, genMs: 2500, firstTokenMs: null });
+assert(
+  missingUsage.tokens === null &&
+    missingUsage.firstTokenMs === null &&
+    missingUsage.overallTps === null &&
+    missingUsage.decodeTps === null,
+  "missing WebLLM usage and TTFT stay unavailable",
+);
+const missingUsageUi = formatMetricsForUi({ completionTokens: null, genMs: 2500, firstTokenMs: null });
+assert(
+  missingUsageUi.tokens === "N/A" &&
+    missingUsageUi.tps === "N/A" &&
+    missingUsageUi.genTime === "2.5 s" &&
+    missingUsageUi.firstTok === "N/A",
+  "UI shows N/A for missing usage, keeps measured generation time",
+);
+
 const ui = formatMetricsForUi({ completionTokens: 366, genMs: 49000, firstTokenMs: 12000 });
 assert(ui.tps === "9.9", `ui tps ${ui.tps}`);
 assert(ui.tokens === "366", "ui tokens");

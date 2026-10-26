@@ -117,17 +117,8 @@ export function guardAssistantOutput(raw, userText, opts = {}) {
 
   if (isCorporateRefusal(t)) {
     const u = String(userText || "").trim().toLowerCase();
-    if (!u || /^(hola|hey|buenas|hello|hi|saludos|qué tal|que tal)\b/.test(u) || u.length < 48) {
-      if (/^(hola|hey|buenas|hello|hi|saludos)\b/.test(u)) return "Hola. ¿Qué necesitas?";
-      return "Vale. Dime qué necesitas y vamos al grano.";
-    }
-    if (/ley|artículo|art\.?\s*\d+|grooming|denuncia|menor|protección|acoso|código penal|183/.test(u)) {
-      return (
-        "Eso es información legítima, no ayuda a delinquir. " +
-        "Resume tu pregunta concreta y te respondo con hechos."
-      );
-    }
-    return "Reformulo: dime en una frase qué necesitas (análisis, cálculo, código, denuncia) y lo trato.";
+    if (/^(hola|hey|buenas|hello|hi|saludos)\b/.test(u)) return "Hola. ¿Qué necesitas?";
+    return t;
   }
 
   if (!opts.skipFidelity && userText) {

@@ -14,18 +14,14 @@
  * }}
  */
 export function computeGenMetrics(input = {}) {
-  const tokens =
-    Number.isFinite(Number(input.completionTokens)) && Number(input.completionTokens) > 0
-      ? Math.floor(Number(input.completionTokens))
-      : null;
-  const genMs =
-    Number.isFinite(Number(input.genMs)) && Number(input.genMs) >= 0
-      ? Number(input.genMs)
-      : null;
-  const firstTokenMs =
-    Number.isFinite(Number(input.firstTokenMs)) && Number(input.firstTokenMs) >= 0
-      ? Number(input.firstTokenMs)
-      : null;
+  const toFiniteNumber = (value) =>
+    value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+  const rawTokens = toFiniteNumber(input.completionTokens);
+  const rawGenMs = toFiniteNumber(input.genMs);
+  const rawFirstTokenMs = toFiniteNumber(input.firstTokenMs);
+  const tokens = rawTokens != null && rawTokens > 0 ? Math.floor(rawTokens) : null;
+  const genMs = rawGenMs != null && rawGenMs >= 0 ? rawGenMs : null;
+  const firstTokenMs = rawFirstTokenMs != null && rawFirstTokenMs >= 0 ? rawFirstTokenMs : null;
 
   let overallTps = null;
   if (tokens != null && genMs != null && genMs > 0) {
