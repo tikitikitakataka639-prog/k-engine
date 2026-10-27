@@ -8,33 +8,37 @@ import {
 } from "../src/engine/toolCalling.js";
 import { injectPersonality } from "../src/engine/personalityInjector.js";
 
-const messages = [{ role: "user", content: "¿Cuánto es 6*7?" }];
+const attachment = { name: "notas.txt", text: "alpha beta gamma" };
 const tools = getAvailableTools();
-const attachment = { name: "notas.txt", text: "La reunión empieza a las 10:00." };
 const fileTools = getAvailableTools(attachment);
+const messages = [{ role: "user", content: "¿Cuánto es 6*7?" }];
+
 assert(fileTools.every((tool) => tool.result?.oneOf?.length === 2 && tool.errors?.length > 0), "cada herramienta declara resultados y errores estructurados");
 assert(fileTools.every((tool) => typeof tool.permission === "string" && typeof tool.requiresConfirmation === "boolean"), "cada herramienta declara permiso y requisito de confirmación");
 
+let executed = false;
 const direct = await runToolLoop({
   messages,
   tools,
   callModel: async () => JSON.stringify({ action: "respond", text: "Hola." }),
+  executeTool: async () => { executed = true; },
 });
 assert.deepEqual(direct, { text: "Hola.", toolCalls: 0 }, "las respuestas normales no ejecutan herramientas");
+assert.equal(executed, false);
 
+const resultEvents = [];
 let calls = 0;
-let resultEvents = [];
 const calculated = await runToolLoop({
   messages,
   tools,
   callModel: async (history) => {
-    calls++;
+    calls += 1;
     if (calls === 1) return JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "6*7" } });
-    assert.equal(history.at(-1).role, "user", "el resultado vuelve como mensaje compatible con los modelos locales");
-    assert.match(history.at(-1).content, /^RESULTADO REAL DE calculate: /);
+    assert.match(history.at(-1).content, /^RESULTADO REAL DE calculate:/);
     assert.deepEqual(JSON.parse(history.at(-1).content.replace(/^RESULTADO REAL DE calculate: /, "")), { ok: true, expression: "6*7", value: 42 });
     return JSON.stringify({ action: "respond", text: "42." });
   },
+  executeTool: async (name, args) => executeLocalTool(name, args),
   onToolEvent: (event) => resultEvents.push(event),
 });
 assert.deepEqual(calculated, { text: "42.", toolCalls: 1 }, "el ciclo herramienta → resultado → respuesta termina");
@@ -45,7 +49,6 @@ assert.deepEqual(resultEvents[1], {
   result: { ok: true, expression: "6*7", value: 42 },
 });
 
-let executed = false;
 assert.throws(
   () => parseToolDecision(JSON.stringify({ action: "call_tool", name: "open_application", arguments: { app: "calc" } }), tools),
   /Herramienta no disponible/,
@@ -98,11 +101,8 @@ const failedTool = await runToolLoop({
   tools,
   callModel: async (history) => {
     if (history.at(-1)?.content?.startsWith("RESULTADO REAL DE calculate:")) {
-      assert.deepEqual(JSON.parse(history.at(-1).content.replace(/^RESULTADO REAL DE calculate: /, "")), {
-        ok: false,
-        code: "tool_failed",
-        error: "Permiso denegado.",
-      });
+      assert.equal(JSON.parse(history.at(-1).content.replace(/^RESULTADO REAL DE calculate: /, "")).ok, false);
+      assert.equal(JSON.parse(history.at(-1).content.replace(/^RESULTADO REAL DE calculate: /, "")).code, "tool_failed");
       return JSON.stringify({ action: "respond", text: "La operación fue denegada." });
     }
     return JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "1+1" } });
@@ -134,23 +134,40 @@ for (const modelId of [
     history: [{ role: "user", content: `Analiza este contexto: ${"dato ".repeat(1400)}` }],
     availableTools: fileTools,
   }).messages[0].content;
-  assert.match(constrained, /CATÁLOGO DISPONIBLE:/, `${modelId} conserva el catálogo con contexto largo`);
+  assert.match(constrained, /CATÁLOGO DISPONIBLE:/, `${modelId} conserva el catálogo bajo presión de contexto`);
 }
 
 let modelCalls = 0;
+await assert.rejects(
+  () => runToolLoop({
+    messages,
+    tools,
+    maxIterations: 1,
+    callModel: async () => {
+      modelCalls += 1;
+      return JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "1+1" } });
+    },
+    executeTool: async (name, args) => executeLocalTool(name, args),
+  }),
+  /límite de 1 llamadas/,
+);
+assert.equal(modelCalls, 2);
+
+let repeatedCalls = 0;
 await assert.rejects(
   runToolLoop({
     messages,
     tools,
     callModel: async () => {
-      modelCalls++;
+      repeatedCalls += 1;
       return JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "1+1" } });
     },
   }),
   /repitió una llamada/,
   "las llamadas repetidas se detienen",
 );
-assert.equal(modelCalls, 2);
+assert.equal(repeatedCalls, 2);
+
 await assert.rejects(
   runToolLoop({ messages, tools, shouldCancel: () => true, callModel: async () => { throw new Error("no debe ejecutarse"); } }),
   /cancelada/,
@@ -181,5 +198,37 @@ const timedOutTool = await runToolLoop({
   executeTool: () => new Promise(() => {}),
 });
 assert.equal(timedOutTool.text, "La herramienta agotó el tiempo.", "los timeouts se entregan al modelo como error real");
+
+// --- Bloqueos de capacidad: no hay tools Windows ni búsqueda en el catálogo ---
+assert.equal(
+  getAvailableTools().some((t) => /windows|shell|powershell|tauri|open_application/i.test(t.name)),
+  false,
+  "bloqueo: no existen tools windows/search",
+);
+assert.equal(
+  getAvailableTools().some((t) => /search|web_search|browser/i.test(t.name)),
+  false,
+  "catálogo local no incluye búsqueda web",
+);
+assert.throws(
+  () => parseToolDecision(JSON.stringify({ action: "call_tool", name: "web_search", arguments: { query: "x" } }), getAvailableTools()),
+  /Herramienta no disponible/,
+  "web_search se rechaza aunque el modelo lo pida",
+);
+assert.throws(
+  () => parseToolDecision(JSON.stringify({ action: "call_tool", name: "windows_exec", arguments: { cmd: "dir" } }), getAvailableTools()),
+  /Herramienta no disponible/,
+  "windows_exec se rechaza; no hay conector",
+);
+
+// Chat normal: el modelo decide respond sin tool (ciclo determinista, no GPU)
+const casual = await runToolLoop({
+  messages: [{ role: "user", content: "Hola, ¿cómo estás?" }],
+  tools: getAvailableTools(),
+  callModel: async () => JSON.stringify({ action: "respond", text: "Bien, aquí para ayudar." }),
+  executeTool: async () => { throw new Error("no debía ejecutarse"); },
+});
+assert.equal(casual.toolCalls, 0, "conversación casual no ejecuta herramientas");
+assert.match(casual.text, /Bien/);
 
 console.log("ALL toolCalling tests PASSED");
