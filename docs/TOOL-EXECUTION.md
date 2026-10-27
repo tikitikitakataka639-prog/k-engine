@@ -30,4 +30,14 @@ Por tanto, esta implementación no habilita todavía operaciones de Windows y no
 3. Para analizar un archivo, usa el botón de adjunto y elige un archivo de texto compatible; formula la petición. La herramienta solo estará en el catálogo para ese mensaje.
 4. El laboratorio muestra la llamada y su resultado. La búsqueda y Windows no aparecerán como herramientas disponibles.
 
-Los modelos configurados se prueban aquí con el mismo protocolo y el ejecutor determinista simulado en pruebas unitarias; una generación real en WebGPU requiere el navegador y la GPU compatibles. Durante el ciclo estructurado, K.ENGINE retiene el JSON de decisión y muestra el texto final al completarse. Las métricas cuentan los tokens reportados por WebLLM para las decisiones JSON, suman el tiempo de inferencia de cada paso y excluyen el tiempo de ejecución de herramientas; el primer token medido pertenece al primer JSON del modelo, no al primer carácter visible de la respuesta final.
+`npm test` comprueba el protocolo y el ciclo con ejecutores deterministas; eso no demuestra que los modelos elijan herramientas. Playwright incluye una prueba real por cada modelo KERNEL: comprueba que una petición aritmética en lenguaje natural ejecuta `calculate`, devuelve el resultado exacto y que una pregunta normal no llama herramientas. Por defecto quedan omitidas. En PowerShell, habilita explícitamente la descarga y ejecuta cada modelo por separado:
+
+```powershell
+$env:E2E_REAL_MODEL = "1"
+$env:E2E_TOOL_MODEL = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
+npm run test:e2e -- --grep "tools reales"
+```
+
+Repite cambiando `E2E_TOOL_MODEL` por cada ID de `src/engine/modelRegistry.js`. Requiere WebGPU con `shader-f16`; la prueba también se omite si el modelo no cabe según la compatibilidad detectada. El resultado solo cuenta como validación semántica para el modelo y equipo que hayan completado la prueba: registra el modelo, navegador/GPU, llamada visible `calculate`, resultado `49997` y ausencia de actividad de herramientas en la pregunta normal.
+
+Durante el ciclo estructurado, K.ENGINE retiene el JSON de decisión y muestra el texto final al completarse. Las métricas cuentan los tokens reportados por WebLLM para las decisiones JSON, suman el tiempo de inferencia de cada paso y excluyen el tiempo de ejecución de herramientas; el primer token medido pertenece al primer JSON del modelo, no al primer carácter visible de la respuesta final.
