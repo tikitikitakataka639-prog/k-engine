@@ -4,7 +4,7 @@
 // (descarga ~0,7 GB desde Hugging Face).
 import { test, expect } from "@playwright/test";
 import { KERNEL_PERSONALITY } from "../../src/engine/personality.js";
-import { DEFAULT_MODEL_ID } from "../../src/engine/modelRegistry.js";
+import { DEFAULT_MODEL_ID, KERNEL_MODEL_IDS } from "../../src/engine/modelRegistry.js";
 
 const LLAMA = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
 const card = (page, id = LLAMA) => page.locator(`[data-testid=model-card][data-model-id="${id}"]`);
@@ -231,4 +231,41 @@ test.describe("laboratorio", () => {
     await card(page).getByTestId("format-confirm-btn").click();
     await expect(card(page)).toHaveAttribute("data-status", "NOT_DOWNLOADED", { timeout: 60_000 });
   });
+
+  for (const modelId of KERNEL_MODEL_IDS) {
+    test(`@gpu tools reales: ${modelId} decide cuándo calcular`, async ({ page }) => {
+      test.setTimeout(30 * 60_000);
+      test.skip(process.env.E2E_REAL_MODEL !== "1" || process.env.E2E_TOOL_MODEL !== modelId,
+        `Descarga explícita requerida: define E2E_REAL_MODEL=1 y E2E_TOOL_MODEL=${modelId}.`);
+      await page.goto("/");
+      const gpu = await gpuInfo(page);
+      test.skip(!(gpu.adapter && gpu.f16), "Necesita WebGPU con shader-f16.");
+      test.info().annotations.push(
+        { type: "modelo", description: modelId },
+        { type: "entorno-webgpu", description: JSON.stringify({ ...gpu, userAgent: await page.evaluate(() => navigator.userAgent) }) },
+      );
+      await startEngine(page);
+
+      const modelCard = card(page, modelId);
+      const loadButton = modelCard.getByTestId("model-main-btn");
+      if (await loadButton.isDisabled()) test.skip(true, `${modelId} no es compatible con los recursos detectados en este equipo.`);
+      await loadButton.click();
+      await expect(modelCard).toHaveAttribute("data-status", "READY", { timeout: 25 * 60_000 });
+      await page.locator("#labInput").fill("Multiplica exactamente 173 por 289 y dime el resultado.");
+      await page.getByRole("button", { name: "Enviar" }).click();
+      const toolActivity = page.getByTestId("tool-activity");
+      await expect(toolActivity).toHaveCount(1, { timeout: 120_000 });
+      await expect(toolActivity).toContainText("calculate");
+      await expect(toolActivity).toContainText("completada");
+      await expect(toolActivity).toContainText(/173\s*\*\s*289\s*=\s*49997/);
+      await expect(page.locator("#labInput")).toBeEnabled({ timeout: 120_000 });
+      await expect(page.getByTestId("msg-kernel").last()).toContainText("49997");
+
+      await page.getByRole("button", { name: "LIMPIAR" }).click();
+      await page.locator("#labInput").fill("¿Cuál es la capital de Francia? Responde solo con el nombre.");
+      await page.getByRole("button", { name: "Enviar" }).click();
+      await expect(page.getByTestId("msg-kernel").last()).toContainText(/Par[ií]s/i, { timeout: 120_000 });
+      await expect(page.getByTestId("tool-activity")).toHaveCount(0);
+    });
+  }
 });
