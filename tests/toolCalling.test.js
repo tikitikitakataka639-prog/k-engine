@@ -153,6 +153,37 @@ await assert.rejects(
 );
 assert.equal(modelCalls, 2);
 
+let repeatedCalls = 0;
+await assert.rejects(
+  runToolLoop({
+    messages,
+    tools,
+    callModel: async () => {
+      repeatedCalls += 1;
+      return JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "1+1" } });
+    },
+  }),
+  /repitió una llamada/,
+  "las llamadas repetidas se detienen",
+);
+assert.equal(repeatedCalls, 2);
+
+await assert.rejects(
+  runToolLoop({ messages, tools, shouldCancel: () => true, callModel: async () => { throw new Error("no debe ejecutarse"); } }),
+  /cancelada/,
+  "la cancelación antes de inferir no inicia una operación",
+);
+const controller = new AbortController();
+const pendingTool = runToolLoop({
+  messages,
+  tools,
+  signal: controller.signal,
+  callModel: async () => JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "1+1" } }),
+  executeTool: () => new Promise(() => {}),
+});
+setTimeout(() => controller.abort(), 5);
+await assert.rejects(pendingTool, /cancelada/, "la cancelación interrumpe una herramienta en espera");
+
 const timedOutTool = await runToolLoop({
   messages,
   tools,

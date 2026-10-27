@@ -1,5 +1,7 @@
 # Ejecución local de herramientas
 
+Consulta el [estado de bloqueos de capacidades](./CAPABILITY-BLOCKS.md).
+
 ## Estado comprobado
 
 La inferencia sigue en el navegador con WebLLM. La versión fijada, `@mlc-ai/web-llm@0.2.79`, declara compatibilidad nativa con `tools` solo para sus modelos Hermes 8B; ninguno de los cuatro modelos configurados en K.ENGINE está en esa lista. Por eso, K.ENGINE no envía `tools` nativas a WebLLM. Usa una decisión JSON en modo `json_object`, valida el objeto y los argumentos contra un catálogo local estricto y solo entonces ejecuta una herramienta.
