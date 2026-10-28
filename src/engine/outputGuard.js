@@ -10,7 +10,7 @@ import { applyCaseFidelityGuard } from "./evidenceFidelity.js";
 import { buildMinimalReportDraft, isSocialReportRequest } from "./denunciaKnowledge.js";
 
 const CORPORATE_RE =
-  /lo siento,?\s*pero\s+no\s+puedo|como\s+ia\s+no\s+(puedo|debo)|no\s+puedo\s+(proporcionar|ayudar|asistir|ofrecer)|ayuda\s+en\s+este\s+tema|cannot\s+help\s+with\s+this(?:\s+topic)?|asistencia\s+para\s+(abuso|violencia)|no\s+estoy\s+autorizad[oa]|te\s+recomiendo\s+contactar\s+con\s+(un\s+)?(profesional|organizaci)|necesitas un momento para calmarte|estoy aqu[ií] para escucharte|hablar un poco antes de abordar/i;
+  /lo siento,?\s*pero\s+no\s+puedo|como\s+ia\s+no\s+(puedo|debo)|no\s+puedo\s+(proporcionar|ayudar|asistir|ofrecer)|ayuda\s+en\s+este\s+tema|i'?m\s+sorry,?\s+but\s+i\s+can'?t|cannot\s+help\s+with\s+this|asistencia\s+para\s+(abuso|violencia)|no\s+estoy\s+autorizad[oa]|te\s+recomiendo\s+contactar\s+con\s+(un\s+)?(profesional|organizaci)|necesitas un momento para calmarte|estoy aqu[ií] para escucharte|hablar un poco antes de abordar/i;
 
 export function detectRepetitionLoop(text) {
   const t = String(text || "").trim();
@@ -139,6 +139,10 @@ export function guardAssistantOutput(raw, userText, opts = {}) {
     }
     const u = String(userText || "").trim().toLowerCase();
     if (/^(hola|hey|buenas|hello|hi|saludos)\b/.test(u)) return "Hola. ¿Qué necesitas?";
+    // Denuncia / reporte legítimo: no dejar la negativa del SLM como respuesta final
+    if (userText && isSocialReportRequest(userText)) {
+      return buildMinimalReportDraft(userText);
+    }
     return t;
   }
 
