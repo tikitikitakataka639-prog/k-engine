@@ -4,6 +4,7 @@ import {
   getAvailableTools,
   parseToolDecision,
   runToolLoop,
+  shouldEnableTools,
   validateTextAttachment,
 } from "../src/engine/toolCalling.js";
 import { injectPersonality } from "../src/engine/personalityInjector.js";
@@ -12,6 +13,13 @@ const attachment = { name: "notas.txt", text: "alpha beta gamma" };
 const tools = getAvailableTools();
 const fileTools = getAvailableTools(attachment);
 const messages = [{ role: "user", content: "¿Cuánto es 6*7?" }];
+
+assert.equal(shouldEnableTools("Necesito redactar una denuncia por lo ocurrido."), false, "una denuncia no activa tools");
+assert.equal(shouldEnableTools("Hola, ¿cómo estás?"), false, "un saludo no activa tools");
+assert.equal(shouldEnableTools("Calcula 12*8"), true, "una petición explícita de cálculo activa tools");
+assert.equal(shouldEnableTools("¿Cuánto es 12 + 8?"), true, "una pregunta aritmética activa tools");
+assert.equal(shouldEnableTools("Analiza el archivo adjunto.", attachment), true, "un adjunto de texto válido activa tools");
+assert.equal(shouldEnableTools("Analiza este PDF.", { name: "doc.pdf", text: "texto" }), false, "un adjunto no admitido no activa tools");
 
 assert(fileTools.every((tool) => tool.result?.oneOf?.length === 2 && tool.errors?.length > 0), "cada herramienta declara resultados y errores estructurados");
 assert(fileTools.every((tool) => typeof tool.permission === "string" && typeof tool.requiresConfirmation === "boolean"), "cada herramienta declara permiso y requisito de confirmación");
@@ -70,7 +78,16 @@ try {
   assert.match(error.message, /Herramienta no disponible/);
 }
 assert.equal(executed, false, "las llamadas no disponibles nunca alcanzan el ejecutor");
-assert.throws(() => parseToolDecision("Voy a abrir la calculadora", tools), /JSON válida/, "texto ordinario nunca se ejecuta como llamada");
+assert.deepEqual(
+  parseToolDecision("Esta es una denuncia redactada en prosa, no una llamada a herramienta.", tools),
+  { action: "respond", text: "Esta es una denuncia redactada en prosa, no una llamada a herramienta.", recovered: true },
+  "la prosa libre se recupera como respuesta sin lanzar una excepción",
+);
+assert.deepEqual(
+  parseToolDecision('{"text":"Respuesta compatible sin campo action."}', tools),
+  { action: "respond", text: "Respuesta compatible sin campo action.", recovered: true },
+  "se acepta un objeto de respuesta sin action",
+);
 assert.throws(
   () => parseToolDecision(JSON.stringify({ action: "call_tool", name: "calculate", arguments: { expression: "globalThis.process.exit()" } }), tools),
   /no es válida/,

@@ -77,10 +77,7 @@ export function validateTextAttachment(attachment) {
   if (typeof attachment.name !== "string" || typeof attachment.text !== "string") {
     return { ok: false, code: "attachment_required", error: "El archivo adjunto debe incluir nombre y texto." };
   }
-  if (
-    attachment.name.length > 180 ||
-    /[\/\\\0]/.test(attachment.name)
-  ) {
+  if (attachment.name.length > 180 || /[\/\\\0]/.test(attachment.name)) {
     return { ok: false, code: "unsupported_format", error: "El nombre de archivo no es válido." };
   }
   const extension = attachment.name.split(".").pop()?.toLowerCase();
@@ -100,6 +97,39 @@ export function getAvailableTools(attachment = null) {
   const tools = [CALCULATE_TOOL];
   if (validateTextAttachment(attachment).ok) tools.push(READ_FILE_TOOL);
   return tools;
+}
+
+/** Activa tools JSON solo cuando aportan (cálculo o adjunto). Evita abortar denuncias/chat. */
+export function shouldEnableTools(userText = "", attachment = null) {
+  if (validateTextAttachment(attachment).ok) return true;
+  const t = String(userText || "").trim();
+  if (!t) return false;
+  return /\b(?:calcula|cu[aá]nto\s+es)\b|\d+\s*[+\-*/×÷]\s*\d+/i.test(t);
+}
+
+function tryExtractJsonObject(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  try {
+    const v = JSON.parse(s);
+    if (v && typeof v === "object" && !Array.isArray(v)) return v;
+  } catch {}
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) {
+    try {
+      const v = JSON.parse(fence[1].trim());
+      if (v && typeof v === "object" && !Array.isArray(v)) return v;
+    } catch {}
+  }
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try {
+      const v = JSON.parse(s.slice(start, end + 1));
+      if (v && typeof v === "object" && !Array.isArray(v)) return v;
+    } catch {}
+  }
+  return null;
 }
 
 export function buildToolProtocolContext(tools) {
@@ -124,24 +154,41 @@ function hasExactKeys(value, expected) {
 }
 
 export function parseToolDecision(raw, tools) {
-  let decision;
-  try {
-    decision = JSON.parse(raw);
-  } catch {
+  const original = String(raw ?? "");
+  let decision = tryExtractJsonObject(original);
+  if (!decision) {
+    const prose = original.trim();
+    if (prose) return { action: "respond", text: prose, recovered: true };
     throw new Error("El modelo no produjo una decisión JSON válida; no se ejecutó ninguna herramienta.");
   }
-  if (!decision || typeof decision !== "object" || Array.isArray(decision) || typeof decision.action !== "string") {
+  if (!decision || typeof decision !== "object" || Array.isArray(decision)) {
     throw new Error("La decisión del modelo no cumple el esquema de herramientas.");
   }
-
-  if (decision.action === "respond") {
-    if (!hasExactKeys(decision, ["action", "text"]) || typeof decision.text !== "string" || !decision.text.trim() || decision.text.length > 8000) {
-      throw new Error("La respuesta directa del modelo no cumple el esquema.");
+  if (typeof decision.action !== "string") {
+    if (hasExactKeys(decision, ["text"]) && typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
+      return { action: "respond", text: decision.text, recovered: true };
     }
-    return { action: "respond", text: decision.text };
+    throw new Error("La decisión del modelo no cumple el esquema de herramientas.");
   }
-
-  if (decision.action !== "call_tool" || !hasExactKeys(decision, ["action", "name", "arguments"])) {
+  if (decision.action === "respond") {
+    if (hasExactKeys(decision, ["action", "text"]) && typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
+      return { action: "respond", text: decision.text };
+    }
+    throw new Error("La respuesta directa del modelo no cumple el esquema.");
+  }
+  if (decision.action !== "call_tool") {
+    if (typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
+      return { action: "respond", text: decision.text, recovered: true };
+    }
+    throw new Error("La decisión del modelo contiene campos o acciones no permitidos.");
+  }
+  if (
+    !hasExactKeys(decision, ["action", "name", "arguments"]) ||
+    !decision.name ||
+    typeof decision.arguments !== "object" ||
+    decision.arguments == null ||
+    Array.isArray(decision.arguments)
+  ) {
     throw new Error("La decisión del modelo contiene campos o acciones no permitidos.");
   }
   const tool = tools.find((candidate) => candidate.name === decision.name);
@@ -149,7 +196,6 @@ export function parseToolDecision(raw, tools) {
   if (!hasExactKeys(decision.arguments, Object.keys(tool.parameters.properties))) {
     throw new Error(`Argumentos no válidos para ${tool.name}. No se ejecutó nada.`);
   }
-
   if (tool.name === "calculate") {
     const expression = decision.arguments.expression;
     if (typeof expression !== "string" || expression.length > 80 || evalSafeArithmetic(expression) == null) {
@@ -157,7 +203,6 @@ export function parseToolDecision(raw, tools) {
     }
     return { action: "call_tool", name: tool.name, arguments: { expression } };
   }
-
   return { action: "call_tool", name: tool.name, arguments: {} };
 }
 
@@ -177,20 +222,18 @@ export function executeLocalTool(name, args, attachment = null) {
       text: validated.attachment.text,
     };
   }
-  throw new Error(`Herramienta no disponible: ${name}.`);
+  throw Object.assign(new Error(`Herramienta no ejecutable: ${name}`), { code: "tool_failed" });
 }
 
 function abortError() {
-  const error = new Error("Generación cancelada.");
-  error.code = "cancelled";
-  return error;
+  return Object.assign(new Error("Generación cancelada."), { code: "cancelled" });
 }
 
 export async function runToolLoop({
   messages,
   tools,
   callModel,
-  executeTool = executeLocalTool,
+  executeTool = (name, args) => executeLocalTool(name, args),
   onToolEvent = () => {},
   shouldCancel = () => false,
   maxIterations = MAX_TOOL_ITERATIONS,
@@ -200,7 +243,6 @@ export async function runToolLoop({
   const conversation = messages.slice();
   const seenCalls = new Set();
   let toolCalls = 0;
-
   while (true) {
     if (shouldCancel() || signal?.aborted) throw abortError();
     const raw = await callModel(conversation);
@@ -210,12 +252,10 @@ export async function runToolLoop({
     if (toolCalls >= maxIterations) {
       throw new Error(`El modelo superó el límite de ${maxIterations} llamadas a herramientas.`);
     }
-
     const fingerprint = JSON.stringify([decision.name, decision.arguments]);
     if (seenCalls.has(fingerprint)) throw new Error("El modelo repitió una llamada a herramienta; se detuvo el ciclo.");
     seenCalls.add(fingerprint);
     onToolEvent({ type: "tool_start", name: decision.name, arguments: decision.arguments });
-
     let result;
     const controller = new AbortController();
     let timeoutId;
