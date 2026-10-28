@@ -11,6 +11,17 @@ import { applyCaseFidelityGuard } from "./evidenceFidelity.js";
 const CORPORATE_RE =
   /lo siento,?\s*pero\s+no\s+puedo|como\s+ia\s+no\s+(puedo|debo)|no\s+puedo\s+(proporcionar|ayudar|asistir|ofrecer)|asistencia\s+para\s+(abuso|violencia)|no\s+estoy\s+autorizad[oa]|te\s+recomiendo\s+contactar\s+con\s+(un\s+)?(profesional|organizaci)|necesitas un momento para calmarte|estoy aqu[ií] para escucharte|hablar un poco antes de abordar/i;
 
+/** Normaliza una línea para comparar bucles (quita numeración de lista y markdown suave). */
+function normalizeLoopLine(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^\s*\d+[.)]\s*/, "")
+    .replace(/^\s*[-*•]\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 export function detectRepetitionLoop(text) {
   const t = String(text || "").trim();
   if (!t) return false;
@@ -19,6 +30,18 @@ export function detectRepetitionLoop(text) {
     const last = lines[lines.length - 1];
     const same = lines.filter((l) => l === last).length;
     if (same >= 3 && last.length >= 2) return true;
+    const norms = lines.map(normalizeLoopLine).filter((l) => l.length >= 24);
+    if (norms.length >= 3) {
+      const lastN = norms[norms.length - 1];
+      const sameN = norms.filter((l) => l === lastN).length;
+      if (sameN >= 3) return true;
+      const tail = norms.slice(-5);
+      const counts = new Map();
+      for (const l of tail) counts.set(l, (counts.get(l) || 0) + 1);
+      for (const c of counts.values()) {
+        if (c >= 3) return true;
+      }
+    }
   }
   const tokens = t.split(/\s+/).filter(Boolean);
   if (tokens.length >= 3) {
@@ -44,6 +67,18 @@ export function collapseRepetition(text) {
     if (lines.length - 1 - i >= 2) {
       t = lines.slice(0, i + 1).concat(last).join("\n").trim();
     }
+  }
+  {
+    const raw = t.split("\n");
+    const out = [];
+    const seenNorm = new Set();
+    for (const line of raw) {
+      const n = normalizeLoopLine(line);
+      if (n.length >= 24 && seenNorm.has(n)) continue;
+      if (n.length >= 24) seenNorm.add(n);
+      out.push(line);
+    }
+    t = out.join("\n").trim();
   }
   t = t.replace(/(\b[\w.:]+\b)(?:\s+\1){2,}/g, "$1");
   t = t.replace(/(.{6,80}?)(\1){2,}/gs, "$1");
