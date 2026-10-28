@@ -36,7 +36,9 @@ export function buildDenunciaKnowledgeContext(text) {
     "LEGALIDAD: No inventes artículos ni afirmes que existe un delito como hecho probado. Si no puedes identificar con seguridad una norma concreta, describe el posible problema y solicita revisión, sin fabricar citas legales.",
     "EVIDENCIA: describe con precisión qué aparece, qué se dice, dónde y en qué contexto si esos datos se han aportado. Un emoji, símbolo o frase aislados no prueban por sí solos intención delictiva; explica la interpretación como tal y señala la combinación de elementos relevantes.",
     "TONO: firme y neutral, sin insultos, amenazas, exageraciones ni exigencias de castigo predeterminado. Solicita revisión del contenido y las medidas que correspondan.",
-    "SALIDA: entrega los campos finales claramente separados y añade el recuento de caracteres de cada uno. No añadas introducción ni sermón. Si se solicita explícitamente, indica qué parte es fundamento jurídico y qué parte es descripción.",
+    "NO INVENTES: fechas, nombres de grupos, URLs, números de caso, artículos de ley ni testigos que el usuario no haya dado. Si falta un dato, escribe [DESCONOCIDO].",
+    "NO REPITAS: cada punto una sola vez. Máximo 6 apartados cortos. Si ya dijiste una petición (p. ej. eliminar contenido), no la vuelvas a numerar.",
+    "SALIDA: estructura breve — (1) hechos aportados, (2) dónde (plataforma/grupo si se indicó), (3) qué se solicita a la autoridad o moderación, (4) datos [DESCONOCIDO] si faltan. Sin relleno ni bucles.",
     "Si el usuario facilita límites concretos, prevalecen sobre cualquier valor predeterminado. No presentes los valores internos del proyecto como límites oficiales universales de una plataforma.",
   ].join("\n");
 }
