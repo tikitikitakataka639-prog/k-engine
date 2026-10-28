@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { injectPersonality, finalizeAssistantText } from "./personalityInjector";
 import { formatMetricsForUi } from "./genMetrics.js";
-import { getAvailableTools, validateTextAttachment } from "./toolCalling.js";
+import { getAvailableTools, shouldEnableTools, validateTextAttachment } from "./toolCalling.js";
 import { postToKernel, isAllowedKernelOrigin, BRIDGE_PROTOCOL } from "./kernelBridge";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
@@ -247,13 +247,15 @@ export function EngineProvider({ children }) {
     setLabError(null);
     const genId = Date.now();
     keRef.current.labGenId = genId;
+    const useTools = shouldEnableTools(trimmed, attachment);
+    const availableTools = useTools ? getAvailableTools(attachment) : [];
     const catalogEntry = (m.catalog?.models || []).find((x) => x.id === id);
     const contextWindow = catalogEntry?.contextWindow || 4096;
     const injected = injectPersonality({
       modelId: id,
       contextWindow,
       history: history.map(({ role, content }) => ({ role, content })),
-      availableTools: getAvailableTools(attachment),
+      availableTools,
     });
     keRef.current.lastUserText = trimmed;
     keRef.current.lastMath = injected.math || null;
@@ -266,6 +268,8 @@ export function EngineProvider({ children }) {
       temperature: injected.temperature,
       top_p: injected.top_p,
       attachment,
+      useTools,
+      tools: availableTools,
     });
     return true;
   }, []);

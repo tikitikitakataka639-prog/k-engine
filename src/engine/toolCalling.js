@@ -104,8 +104,7 @@ export function shouldEnableTools(userText = "", attachment = null) {
   if (validateTextAttachment(attachment).ok) return true;
   const t = String(userText || "").trim();
   if (!t) return false;
-  if (/(calcula|cuánto es|cuanto es|resuelve|opera(?:ción)?|\d+\s*[+\-*/×÷]\s*\d+)/i.test(t)) return true;
-  return false;
+  return /\b(?:calcula|cu[aá]nto\s+es)\b|\d+\s*[+\-*/×÷]\s*\d+/i.test(t);
 }
 
 function tryExtractJsonObject(raw) {
@@ -159,31 +158,37 @@ export function parseToolDecision(raw, tools) {
   let decision = tryExtractJsonObject(original);
   if (!decision) {
     const prose = original.trim();
-    if (prose && prose.length <= 8000) return { action: "respond", text: prose, recovered: true };
+    if (prose) return { action: "respond", text: prose, recovered: true };
     throw new Error("El modelo no produjo una decisión JSON válida; no se ejecutó ninguna herramienta.");
   }
   if (!decision || typeof decision !== "object" || Array.isArray(decision)) {
     throw new Error("La decisión del modelo no cumple el esquema de herramientas.");
   }
   if (typeof decision.action !== "string") {
-    if (typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
+    if (hasExactKeys(decision, ["text"]) && typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
       return { action: "respond", text: decision.text, recovered: true };
     }
     throw new Error("La decisión del modelo no cumple el esquema de herramientas.");
   }
   if (decision.action === "respond") {
-    if (typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
+    if (hasExactKeys(decision, ["action", "text"]) && typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
       return { action: "respond", text: decision.text };
     }
     throw new Error("La respuesta directa del modelo no cumple el esquema.");
   }
   if (decision.action !== "call_tool") {
-    if (typeof decision.text === "string" && decision.text.trim()) {
+    if (typeof decision.text === "string" && decision.text.trim() && decision.text.length <= 8000) {
       return { action: "respond", text: decision.text, recovered: true };
     }
     throw new Error("La decisión del modelo contiene campos o acciones no permitidos.");
   }
-  if (!decision.name || typeof decision.arguments !== "object" || decision.arguments == null || Array.isArray(decision.arguments)) {
+  if (
+    !hasExactKeys(decision, ["action", "name", "arguments"]) ||
+    !decision.name ||
+    typeof decision.arguments !== "object" ||
+    decision.arguments == null ||
+    Array.isArray(decision.arguments)
+  ) {
     throw new Error("La decisión del modelo contiene campos o acciones no permitidos.");
   }
   const tool = tools.find((candidate) => candidate.name === decision.name);

@@ -6,7 +6,7 @@
 import { prebuiltAppConfig, CreateMLCEngine } from "@mlc-ai/web-llm";
 import { computeGenMetrics } from "../engine/genMetrics.js";
 import { buildKernelAppConfig, KERNEL_MODEL_IDS } from "../engine/modelRegistry.js";
-import { executeLocalTool, getAvailableTools, runToolLoop } from "../engine/toolCalling.js";
+import { executeLocalTool, runToolLoop } from "../engine/toolCalling.js";
 
 let engine = null;
 let loadedModel = null;
@@ -397,62 +397,93 @@ self.onmessage = async (e) => {
       let totalGenMs = 0;
       let totalTokens = 0;
       let usageMissing = false;
-      const tools = getAvailableTools(msg.attachment);
-      const loop = await runToolLoop({
-        messages: msg.messages,
-        tools,
-        signal: generationController.signal,
-        shouldCancel: () => cancelRequested,
-        onToolEvent: (event) => {
-          if (event.type === "tool_start") {
-            self.postMessage({ type: "tool_start", id: msg.id, name: event.name, arguments: event.arguments });
-          } else {
-            const result = event.result;
-            const summary = result.ok
-              ? event.name === "calculate"
-                ? `${result.expression} = ${result.value}`
-                : `Leído ${result.fileName} (${result.characters} caracteres): ${result.text.slice(0, 300)}${result.text.length > 300 ? "…" : ""}`
-              : `Error: ${result.error}`;
-            self.postMessage({ type: "tool_result", id: msg.id, name: event.name, ok: result.ok, summary });
+      const tools = msg.useTools && Array.isArray(msg.tools) ? msg.tools : [];
+      if (tools.length === 0) {
+        const callStarted = performance.now();
+        let callUsage = null;
+        const chunks = await engine.chat.completions.create({
+          messages: msg.messages,
+          temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.6,
+          top_p: Number.isFinite(Number(msg.top_p)) ? Number(msg.top_p) : 0.9,
+          max_tokens: Number.isFinite(Number(msg.max_tokens)) ? Math.max(1, Number(msg.max_tokens)) : 512,
+          stream: true,
+          stream_options: { include_usage: true },
+        });
+        for await (const chunk of chunks) {
+          if (cancelRequested) {
+            engine.interruptGenerate();
+            throw new Error("Generación cancelada.");
           }
-        },
-        executeTool: (name, args) => executeLocalTool(name, args, msg.attachment),
-        callModel: async (messages) => {
-          if (cancelRequested) throw new Error("Generación cancelada.");
-          const callStarted = performance.now();
-          let raw = "";
-          let callUsage = null;
-          const chunks = await engine.chat.completions.create({
-            messages,
-            temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.6,
-            top_p: Number.isFinite(Number(msg.top_p)) ? Number(msg.top_p) : 0.9,
-            max_tokens: Number.isFinite(Number(msg.max_tokens)) ? Math.max(1, Number(msg.max_tokens)) : 512,
-            response_format: { type: "json_object" },
-            stream: true,
-            stream_options: { include_usage: true },
-          });
-          for await (const chunk of chunks) {
-            if (cancelRequested) {
-              engine.interruptGenerate();
-              throw new Error("Generación cancelada.");
-            }
-            const delta = chunk.choices?.[0]?.delta?.content || "";
-            if (delta) {
-              raw += delta;
-              if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
-            }
-            if (chunk.usage && Number.isFinite(Number(chunk.usage.completion_tokens))) {
-              callUsage = Number(chunk.usage.completion_tokens);
-            }
+          const delta = chunk.choices?.[0]?.delta?.content || "";
+          if (delta) {
+            if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
+            self.postMessage({ type: "token", id: msg.id, delta });
           }
-          totalGenMs += performance.now() - callStarted;
-          if (callUsage === null) usageMissing = true;
-          else totalTokens += callUsage;
-          return raw;
-        },
-      });
+          if (chunk.usage && Number.isFinite(Number(chunk.usage.completion_tokens))) {
+            callUsage = Number(chunk.usage.completion_tokens);
+          }
+        }
+        totalGenMs += performance.now() - callStarted;
+        if (callUsage === null) usageMissing = true;
+        else totalTokens += callUsage;
+      } else {
+        const loop = await runToolLoop({
+          messages: msg.messages,
+          tools,
+          signal: generationController.signal,
+          shouldCancel: () => cancelRequested,
+          onToolEvent: (event) => {
+            if (event.type === "tool_start") {
+              self.postMessage({ type: "tool_start", id: msg.id, name: event.name, arguments: event.arguments });
+            } else {
+              const result = event.result;
+              const summary = result.ok
+                ? event.name === "calculate"
+                  ? `${result.expression} = ${result.value}`
+                  : `Leído ${result.fileName} (${result.characters} caracteres): ${result.text.slice(0, 300)}${result.text.length > 300 ? "…" : ""}`
+                : `Error: ${result.error}`;
+              self.postMessage({ type: "tool_result", id: msg.id, name: event.name, ok: result.ok, summary });
+            }
+          },
+          executeTool: (name, args) => executeLocalTool(name, args, msg.attachment),
+          callModel: async (messages) => {
+            if (cancelRequested) throw new Error("Generación cancelada.");
+            const callStarted = performance.now();
+            let raw = "";
+            let callUsage = null;
+            const chunks = await engine.chat.completions.create({
+              messages,
+              temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.6,
+              top_p: Number.isFinite(Number(msg.top_p)) ? Number(msg.top_p) : 0.9,
+              max_tokens: Number.isFinite(Number(msg.max_tokens)) ? Math.max(1, Number(msg.max_tokens)) : 512,
+              response_format: { type: "json_object" },
+              stream: true,
+              stream_options: { include_usage: true },
+            });
+            for await (const chunk of chunks) {
+              if (cancelRequested) {
+                engine.interruptGenerate();
+                throw new Error("Generación cancelada.");
+              }
+              const delta = chunk.choices?.[0]?.delta?.content || "";
+              if (delta) {
+                raw += delta;
+                if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
+              }
+              if (chunk.usage && Number.isFinite(Number(chunk.usage.completion_tokens))) {
+                callUsage = Number(chunk.usage.completion_tokens);
+              }
+            }
+            totalGenMs += performance.now() - callStarted;
+            if (callUsage === null) usageMissing = true;
+            else totalTokens += callUsage;
+            return raw;
+          },
+        });
+        if (cancelRequested) throw new Error("Generación cancelada.");
+        self.postMessage({ type: "token", id: msg.id, delta: loop.text });
+      }
       if (cancelRequested) throw new Error("Generación cancelada.");
-      self.postMessage({ type: "token", id: msg.id, delta: loop.text });
       const metrics = computeGenMetrics({
         completionTokens: usageMissing ? null : totalTokens,
         genMs: Math.round(totalGenMs),
