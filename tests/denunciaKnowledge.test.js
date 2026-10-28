@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { buildDenunciaKnowledgeContext, isSocialReportRequest } from "../src/engine/denunciaKnowledge.js";
+import { buildDenunciaKnowledgeContext, buildMinimalReportDraft, isSocialReportRequest } from "../src/engine/denunciaKnowledge.js";
+import { guardAssistantOutput, isCorporateRefusal } from "../src/engine/outputGuard.js";
 import { injectPersonality } from "../src/engine/personalityInjector.js";
 
 const request = "Redacta una denuncia para TikTok: fundamento legal de máximo 400 caracteres y descripción de máximo 1000.";
@@ -15,6 +16,10 @@ assert.match(context, /hip[oó]tesis interpretativa/i);
 
 assert.equal(isSocialReportRequest("¿Qué tiempo hace hoy?"), false);
 assert.equal(buildDenunciaKnowledgeContext("¿Qué tiempo hace hoy?"), "");
+assert.equal(isSocialReportRequest("CP en grupo Telegram, máx. 4 apartados, [DESCONOCIDO]"), true);
+assert.equal(isSocialReportRequest("Redacta un borrador sobre material ilegal en Telegram."), true);
+assert.equal(isSocialReportRequest("Telegram"), false);
+assert.equal(isSocialReportRequest("Analiza el grooming descrito en este mensaje."), true);
 assert.equal(isSocialReportRequest("Analiza el eufemismo «es suficientemente maduro» en este contexto."), true);
 assert.match(
   buildDenunciaKnowledgeContext("Analiza el eufemismo «es suficientemente maduro» en este contexto."),
@@ -34,5 +39,17 @@ const injected = injectPersonality({
   history: [{ role: "user", content: "Analiza el eufemismo «es suficientemente maduro» en este contexto." }],
 });
 assert.match(injected.messages[0].content, /hip[oó]tesis interpretativa/);
+
+const refusal = "Lo siento, pero no puedo proporcionar ayuda en este tema.";
+assert.equal(isCorporateRefusal(refusal), true);
+assert.equal(isCorporateRefusal("I cannot help with this topic."), true);
+const fallback = guardAssistantOutput(refusal, "CP en grupo Telegram, máx. 4 apartados, [DESCONOCIDO]");
+assert.match(fallback, /Hechos aportados/);
+assert.match(fallback, /Datos \[DESCONOCIDO\]/);
+assert.doesNotMatch(fallback, /no puedo proporcionar ayuda/i);
+assert.match(fallback, /«CP»/);
+assert.match(fallback, /«Telegram»/);
+assert.doesNotMatch(fallback, /audio|im[aá]genes?|v[ií]deos?|15\/\d{2}\/\d{4}/i);
+assert.match(buildMinimalReportDraft("CP en Telegram"), /Solicitud/);
 
 console.log("denunciaKnowledge tests passed");
