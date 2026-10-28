@@ -5,10 +5,14 @@
  * de las plataformas; prevalecen los límites que indique el usuario.
  */
 
-const REPORT_INTENT = /\b(denuncia|denunciar|reportar|reporte|reclamaci[oó]n|texto para moderaci[oó]n|apelar una sanci[oó]n|informar a moderaci[oó]n)\b/i;
+const REPORT_INTENT = /\b(denuncia|denunciar|reportar|reporte|borrador|apartados?|polic[ií]a|reclamaci[oó]n|texto para moderaci[oó]n|apelar una sanci[oó]n|informar a moderaci[oó]n)\b/i;
 const ANALYSIS_ACTION = /\b(analiza|an[aá]lisis|interpreta|identifica|detecta|documenta|revisa|eval[uú]a|explica|qu[eé]\s+significa)\b/i;
 const SENSITIVE_LANGUAGE =
   /\b(grooming|captaci[oó]n|lenguaje\s+codificado|eufemismo|eufemismos|ret[oó]rica\s+map|map|pro[\s-]?contacto|minimizaci[oó]n\s+(?:del\s+)?abuso|normaliza(?:ci[oó]n)?\s+(?:del\s+)?abuso)\b/i;
+const SENSITIVE_REPORT_TOPIC =
+  /\b(cp|csam|abuso\s+infantil|telegram|grooming|map|grupo|canal|material\s+ilegal)\b/i;
+const REPORT_ACTION_OR_STRUCTURE =
+  /\b(apartados?|desconocido|redacta|redactar|borrador|denuncia|denunciar|reporta|reportar|documenta|documentar)\b|\[desconocido\]/i;
 
 const PLATFORM_PATTERNS = [
   { id: "tiktok", re: /\btik\s?tok\b/i, limits: "Campo de fundamento/jurisdicción: máximo 400 caracteres. Descripción de hechos: máximo 1000 caracteres." },
@@ -19,7 +23,42 @@ const PLATFORM_PATTERNS = [
 
 export function isSocialReportRequest(text) {
   const input = String(text || "");
-  return REPORT_INTENT.test(input) || (ANALYSIS_ACTION.test(input) && SENSITIVE_LANGUAGE.test(input));
+  return (
+    REPORT_INTENT.test(input) ||
+    (ANALYSIS_ACTION.test(input) && SENSITIVE_LANGUAGE.test(input)) ||
+    (SENSITIVE_REPORT_TOPIC.test(input) && REPORT_ACTION_OR_STRUCTURE.test(input))
+  );
+}
+
+export function buildMinimalReportDraft(userText) {
+  const input = String(userText || "");
+  const mentioned = [];
+  if (/\bcp\b/i.test(input)) mentioned.push("CP");
+  if (/\bcsam\b/i.test(input)) mentioned.push("CSAM");
+  if (/\babuso\s+infantil\b/i.test(input)) mentioned.push("abuso infantil");
+  if (/\btelegram\b/i.test(input)) mentioned.push("Telegram");
+  if (/\bgrooming\b/i.test(input)) mentioned.push("grooming");
+  if (/\bmap\b/i.test(input)) mentioned.push("MAP");
+  if (/\bgrupo\b/i.test(input)) mentioned.push("grupo");
+  if (/\bcanal\b/i.test(input)) mentioned.push("canal");
+
+  const facts = mentioned.length
+    ? `El mensaje aportado menciona: ${mentioned.map((term) => `«${term}»`).join(", ")}.`
+    : "El mensaje no aporta hechos concretos adicionales.";
+
+  return [
+    "Hechos aportados",
+    facts,
+    "",
+    "Indicios e hipótesis",
+    "La mención por sí sola no permite confirmar la naturaleza, el contexto ni la legalidad del contenido; requiere valoración.",
+    "",
+    "Datos [DESCONOCIDO]",
+    "Identidades, fecha, enlace, contenido concreto, procedencia y demás circunstancias: [DESCONOCIDO].",
+    "",
+    "Solicitud",
+    "Solicito que la autoridad competente revise la información aportada y determine las actuaciones procedentes.",
+  ].join("\n");
 }
 
 export function buildDenunciaKnowledgeContext(text) {
