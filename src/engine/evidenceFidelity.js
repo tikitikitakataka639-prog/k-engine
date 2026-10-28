@@ -94,6 +94,81 @@ export function detectUnverifiedAsFact(userText, assistantText) {
   return issues;
 }
 
+export function detectUnsupportedReportDetails(userText, assistantText) {
+  const u = String(userText || "").toLowerCase();
+  const a = String(assistantText || "");
+  const issues = [];
+
+  const unsupportedPatterns = [
+    {
+      code: "unsupported_date",
+      re: /\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+\d{4})\b/gi,
+      label: "una fecha",
+    },
+    {
+      code: "unsupported_url",
+      re: /\b(?:https?:\/\/|www\.)[^\s<>()]+/gi,
+      label: "una URL",
+    },
+    {
+      code: "unsupported_evidence_modality",
+      re: /\b(?:audios?|im[aá]genes?|fotos?|fotograf[ií]as?|v[ií]deos?|videos?|capturas de pantalla)\b/gi,
+      label: "una modalidad concreta de evidencia (audio/imagen/vídeo)",
+    },
+  ];
+
+  for (const { code, re, label } of unsupportedPatterns) {
+    const matches = [...a.matchAll(re)];
+    const unsupported = matches.some((match) => {
+      if (u.includes(match[0].toLowerCase())) return false;
+      if (code !== "unsupported_evidence_modality") return true;
+      const start = Math.max(a.lastIndexOf(".", match.index), a.lastIndexOf("\n", match.index)) + 1;
+      const endCandidates = [a.indexOf(".", match.index), a.indexOf("\n", match.index)].filter((i) => i >= 0);
+      const end = endCandidates.length ? Math.min(...endCandidates) : a.length;
+      const sentence = a.slice(start, end);
+      return !/(?:no\s+(?:consta|se\s+sabe|se\s+indic[oó]|se\s+aport[oó]|hay)|desconocid[oa]|sin\s+(?:especificar|indicar|aportar)|si\s+(?:existe|hay)|\[DESCONOCIDO\])/i.test(sentence);
+    });
+    if (unsupported) {
+      issues.push({
+        code,
+        detail: `La respuesta añade ${label} no aportada por el usuario; sustitúyela por [DESCONOCIDO] o elimínala.`,
+      });
+    }
+  }
+
+  const namedGroups = [
+    ...a.matchAll(/\b(?:grupo|canal)\s+(?:de\s+telegram\s+)?(?:llamado|denominado|titulado|conocido\s+como)\s+["«]?([^"»\n,.;]{2,60})/gi),
+    ...a.matchAll(/\b(?:grupo|canal)\s+["«]([^"»\n]{2,60})["»]/gi),
+  ].map((match) => match[1].trim());
+  if (namedGroups.some((name) => name !== "[DESCONOCIDO]" && !u.toLowerCase().includes(name.toLowerCase()))) {
+    issues.push({
+      code: "unsupported_group_name",
+      detail: "La respuesta atribuye un nombre a un grupo/canal que el usuario no aportó; sustitúyelo por [DESCONOCIDO] o elimínalo.",
+    });
+  }
+
+  const analysisRequest =
+    /\b(?:grooming|captaci[oó]n|eufemismo|lenguaje\s+codificado|map|pro[\s-]?contacto)\b/i.test(u);
+  if (analysisRequest) {
+    const claims = [
+      ...a.matchAll(/\b(?:es|significa|demuestra|confirma)\s+(?:claramente\s+)?(?:grooming|captaci[oó]n|abuso|intenci[oó]n\s+de\s+captar)\b/gi),
+    ];
+    const unqualified = claims.some((match) => {
+      const sentenceStart = Math.max(a.lastIndexOf(".", match.index), a.lastIndexOf("\n", match.index)) + 1;
+      const prefix = a.slice(sentenceStart, match.index);
+      return !/\b(?:posible|podr[ií]a|podr[ií]an|hip[oó]tesis|indicio|compatible\s+con|parece)\b/i.test(prefix);
+    });
+    if (unqualified) {
+      issues.push({
+        code: "unqualified_interpretation",
+        detail: "La interpretación del lenguaje debe presentarse como hipótesis o posible indicio, no como una conclusión probada.",
+      });
+    }
+  }
+
+  return issues;
+}
+
 export function detectVersionBias(userText, assistantText) {
   const u = String(userText || "");
   const a = String(assistantText || "");
@@ -129,6 +204,7 @@ export function validateCaseFidelity(userText, assistantText) {
     });
   }
   issues.push(...detectUnverifiedAsFact(userText, assistantText));
+  issues.push(...detectUnsupportedReportDetails(userText, assistantText));
   issues.push(...detectVersionBias(userText, assistantText));
 
   return { ok: issues.length === 0, issues, inventedNames };
@@ -140,6 +216,7 @@ export function buildFidelityCorrection(userText, assistantText, validation) {
     ...validation.issues.map((iss) => `- ${iss.detail}`),
     "",
     "Se conserva la respuesta original para evitar sustituirla por una plantilla genérica no sustentada.",
+    "Corrige los datos no aportados usando [DESCONOCIDO] o elimínalos antes de utilizar el borrador.",
     "",
     "Respuesta original:",
     String(assistantText || ""),
@@ -152,7 +229,7 @@ export function buildFidelityCorrection(userText, assistantText, validation) {
 export function applyCaseFidelityGuard(raw, userText) {
   const u = String(userText || "");
   const analyticalSignals =
-    /versi[oó]n|hechos|indicios|hip[oó]tesis|tarjeta|prueba|evidencia|analiza|contradic|testigo|c[aá]mara|grabaci[oó]n|declaraci[oó]n|investigaci[oó]n|corrobor|autor[ií]a|denuncia|grooming/i.test(
+    /versi[oó]n|hechos|indicios|hip[oó]tesis|tarjeta|prueba|evidencia|analiza|contradic|testigo|c[aá]mara|grabaci[oó]n|declaraci[oó]n|investigaci[oó]n|corrobor|autor[ií]a|denuncia|report(?:e|ar)|grooming|captaci[oó]n|eufemismo|lenguaje\s+codificado|\bmap\b|pro[\s-]?contacto/i.test(
       u
     );
 

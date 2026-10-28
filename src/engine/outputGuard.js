@@ -20,6 +20,11 @@ export function detectRepetitionLoop(text) {
     const same = lines.filter((l) => l === last).length;
     if (same >= 3 && last.length >= 2) return true;
   }
+  const listItems = lines
+    .map((line) => line.match(/^\s*(?:\d+[.)]|[-*•])\s+(.+?)\s*$/)?.[1])
+    .filter(Boolean)
+    .map((item) => item.replace(/\s+/g, " ").trim().toLocaleLowerCase("es"));
+  if (listItems.length >= 3 && new Set(listItems).size < listItems.length) return true;
   const tokens = t.split(/\s+/).filter(Boolean);
   if (tokens.length >= 3) {
     const last = tokens[tokens.length - 1];
@@ -45,6 +50,18 @@ export function collapseRepetition(text) {
       t = lines.slice(0, i + 1).concat(last).join("\n").trim();
     }
   }
+  const seenNumberedItems = new Set();
+  t = t
+    .split("\n")
+    .filter((line) => {
+      const item = line.match(/^\s*(?:\d+[.)]|[-*•])\s+(.+?)\s*$/);
+      if (!item) return true;
+      const key = item[1].replace(/\s+/g, " ").trim().toLocaleLowerCase("es");
+      if (seenNumberedItems.has(key)) return false;
+      seenNumberedItems.add(key);
+      return true;
+    })
+    .join("\n");
   t = t.replace(/(\b[\w.:]+\b)(?:\s+\1){2,}/g, "$1");
   t = t.replace(/(.{6,80}?)(\1){2,}/gs, "$1");
   return t.trim();

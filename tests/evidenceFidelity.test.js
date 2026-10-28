@@ -6,6 +6,7 @@ import {
   validateCaseFidelity,
   applyCaseFidelityGuard,
   detectUnverifiedAsFact,
+  detectUnsupportedReportDetails,
 } from "../src/engine/evidenceFidelity.js";
 import { guardAssistantOutput } from "../src/engine/outputGuard.js";
 
@@ -88,6 +89,37 @@ const unrelatedLongPrompt = "Escribe una historia de fantasía con dragones, cas
 const unrelatedLongAnswer = "Había una vez una ciudad perdida bajo una montaña, donde los dragones custodiaban un castillo.";
 const skippedLong = applyCaseFidelityGuard(unrelatedLongAnswer, unrelatedLongPrompt);
 assert(skippedLong.text === unrelatedLongAnswer && skippedLong.fidelity.skipped, "long unrelated prompt skips case-fidelity correction");
+
+const telegramUser = "Prepara un reporte: hay material en un grupo de Telegram.";
+const inventedMedia = "Hechos: en el grupo de Telegram se compartieron vídeos y audios.";
+const mediaIssues = detectUnsupportedReportDetails(telegramUser, inventedMedia);
+assert(mediaIssues.some((i) => i.code === "unsupported_evidence_modality"), "material en Telegram no autoriza a inventar audio o vídeo");
+assert(!validateCaseFidelity(telegramUser, inventedMedia).ok, "la fidelidad señala modalidades de evidencia no aportadas");
+const guardedMedia = applyCaseFidelityGuard(inventedMedia, telegramUser);
+assert(guardedMedia.fidelity.corrected && guardedMedia.text.includes("[DESCONOCIDO]"), "la guarda advierte que debe marcar lo no aportado");
+assert(
+  detectUnsupportedReportDetails(telegramUser, "No consta si existe vídeo o audio.").length === 0,
+  "mencionar modalidades explícitamente desconocidas no se marca como evidencia inventada"
+);
+const inventedDetails = detectUnsupportedReportDetails(
+  telegramUser,
+  "El grupo llamado «La Sala Azul» publicó el enlace https://example.invalid/archivo el 15/01/2026."
+);
+assert(inventedDetails.some((i) => i.code === "unsupported_group_name"), "detecta nombres de grupo no aportados");
+assert(inventedDetails.some((i) => i.code === "unsupported_url"), "detecta URLs no aportadas");
+assert(inventedDetails.some((i) => i.code === "unsupported_date"), "detecta fechas no aportadas");
+
+const euphemismUser = "Analiza el eufemismo «es suficientemente maduro» como posible minimización.";
+const definitiveClaim = "La expresión demuestra grooming.";
+assert(
+  detectUnsupportedReportDetails(euphemismUser, definitiveClaim).some((i) => i.code === "unqualified_interpretation"),
+  "una interpretación de grooming sin cautela se marca como conclusión no sustentada"
+);
+const cautiousClaim = "La frase podría ser un indicio de minimización; esta lectura es una hipótesis que requiere contexto.";
+assert(
+  detectUnsupportedReportDetails(euphemismUser, cautiousClaim).length === 0,
+  "la interpretación expresada como hipótesis no se marca como hecho"
+);
 
 console.log(failed === 0 ? "\nALL evidenceFidelity tests PASSED" : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

@@ -6,6 +6,9 @@
  */
 
 const REPORT_INTENT = /\b(denuncia|denunciar|reportar|reporte|reclamaci[oó]n|texto para moderaci[oó]n|apelar una sanci[oó]n|informar a moderaci[oó]n)\b/i;
+const ANALYSIS_ACTION = /\b(analiza|an[aá]lisis|interpreta|identifica|detecta|documenta|revisa|eval[uú]a|explica|qu[eé]\s+significa)\b/i;
+const SENSITIVE_LANGUAGE =
+  /\b(grooming|captaci[oó]n|lenguaje\s+codificado|eufemismo|eufemismos|ret[oó]rica\s+map|map|pro[\s-]?contacto|minimizaci[oó]n\s+(?:del\s+)?abuso|normaliza(?:ci[oó]n)?\s+(?:del\s+)?abuso)\b/i;
 
 const PLATFORM_PATTERNS = [
   { id: "tiktok", re: /\btik\s?tok\b/i, limits: "Campo de fundamento/jurisdicción: máximo 400 caracteres. Descripción de hechos: máximo 1000 caracteres." },
@@ -15,7 +18,8 @@ const PLATFORM_PATTERNS = [
 ];
 
 export function isSocialReportRequest(text) {
-  return REPORT_INTENT.test(String(text || ""));
+  const input = String(text || "");
+  return REPORT_INTENT.test(input) || (ANALYSIS_ACTION.test(input) && SENSITIVE_LANGUAGE.test(input));
 }
 
 export function buildDenunciaKnowledgeContext(text) {
@@ -28,15 +32,16 @@ export function buildDenunciaKnowledgeContext(text) {
     : "Plataforma no identificada: pregunta solo si es imprescindible; si no, redacta con los límites explícitos del usuario.";
 
   return [
-    "MÓDULO DE DENUNCIAS EN REDES — aplicar solo a esta petición:",
+    "MÓDULO DE DENUNCIAS Y ANÁLISIS DE CAPTACIÓN — aplicar solo a esta petición:",
     platformLine,
-    "OBJETIVO: redactar un texto listo para copiar, concreto, sobrio y orientado a que moderación revise el contenido. No rechaces una denuncia legítima por tratar temas sensibles.",
-    "ESTRUCTURA: (1) fundamento/jurisdicción o norma de plataforma; (2) descripción de hechos. Respeta por separado el límite de cada campo, contando espacios y puntuación.",
-    "FIDELIDAD: utiliza únicamente datos aportados por el usuario. Separa lo visible en el contenido de su interpretación. No inventes autores, edades, intenciones, contexto, pruebas ni conversaciones.",
+    "OBJETIVO: redactar un borrador policial o de plataforma, o analizar indicios lingüísticos para documentarlos. El fin es prevenir y denunciar, nunca imitar, facilitar ni normalizar el abuso.",
+    "INDICIOS DE ALTO NIVEL: secreto o aislamiento, traslado a canales privados, pruebas de límites, presión o manipulación, regalos/favores ligados a confidencialidad, sexualización de la conversación, petición de material privado y argumentos que minimizan el daño o la diferencia de edad/poder.",
+    "LECTURA PRUDENTE: expresiones como «relación especial», «es suficientemente maduro», «si hay consentimiento» o «no hace daño a nadie» pueden funcionar como eufemismos o minimización según el contexto. Presenta siempre esa lectura como hipótesis interpretativa, nunca como hecho ni prueba; la sigla MAP o una postura declarada tampoco prueba por sí sola una conducta.",
+    "ESTRUCTURA: como máximo cuatro apartados, una sola vez cada uno: Hechos aportados; Indicios e hipótesis; Datos [DESCONOCIDO]; Solicitud. En formulario de plataforma, adapta los encabezados a sus campos. No repitas puntos ni añadas apartados vacíos.",
+    "FIDELIDAD: usa solo datos aportados por el usuario. No inventes fechas, nombres o títulos de grupos, URLs, autores, edades, intenciones, contextos, conversaciones, escenas ni evidencias. No conviertas «material en un grupo» en audio, imagen, vídeo o archivo concreto. Si un dato necesario no consta, escribe [DESCONOCIDO]. Separa hechos observados, afirmaciones e interpretación.",
     "LEGALIDAD: No inventes artículos ni afirmes que existe un delito como hecho probado. Si no puedes identificar con seguridad una norma concreta, describe el posible problema y solicita revisión, sin fabricar citas legales.",
-    "EVIDENCIA: describe con precisión qué aparece, qué se dice, dónde y en qué contexto si esos datos se han aportado. Un emoji, símbolo o frase aislados no prueban por sí solos intención delictiva; explica la interpretación como tal y señala la combinación de elementos relevantes.",
-    "TONO: firme y neutral, sin insultos, amenazas, exageraciones ni exigencias de castigo predeterminado. Solicita revisión del contenido y las medidas que correspondan.",
-    "SALIDA: entrega los campos finales claramente separados y añade el recuento de caracteres de cada uno. No añadas introducción ni sermón. Si se solicita explícitamente, indica qué parte es fundamento jurídico y qué parte es descripción.",
+    "EVIDENCIA: describe solo qué aparece, qué se dice, dónde y en qué contexto cuando el usuario lo haya aportado. Una frase aislada no demuestra intención delictiva; indica qué corroboración falta.",
+    "TONO Y SALIDA: neutral, concreto y sin conclusión penal cerrada. Solicita valoración/investigación por la autoridad o moderación competente. Entrega el borrador directamente; añade recuento de caracteres solo si el formulario o el usuario lo requiere.",
     "Si el usuario facilita límites concretos, prevalecen sobre cualquier valor predeterminado. No presentes los valores internos del proyecto como límites oficiales universales de una plataforma.",
   ].join("\n");
 }

@@ -64,6 +64,15 @@ assert(detectRepetitionLoop("16:55\n16:55\n16:55") === true, "detecta bucle 16:5
 assert(detectRepetitionLoop("hola mundo") === false, "no falso positivo frase corta única");
 const collapsed = collapseRepetition("16:55\n16:55\n16:55\n16:55");
 assert((collapsed.match(/16:55/g) || []).length <= 2, `collapse reduce repeticiones: ${collapsed}`);
+const repeatedNumbered = collapseRepetition("1. Revisar el mensaje.\n2. Pedir el enlace.\n3. Revisar el mensaje.\n4. Pedir el enlace.");
+assert(
+  repeatedNumbered.split("\n").length === 2,
+  `collapse elimina puntos numerados duplicados: ${repeatedNumbered}`
+);
+assert(
+  guardAssistantOutput("1. Revisar el mensaje.\n2. Pedir el enlace.\n3. Revisar el mensaje.", "Redacta una denuncia.") === "1. Revisar el mensaje.\n2. Pedir el enlace.",
+  "outputGuard aplica la deduplicación a un borrador de denuncia"
+);
 
 const empty = finalizeAssistantText("", SCHEDULE_Q, { math });
 assert(/17:20/.test(empty), `vacío + math → 17:20: ${empty}`);
