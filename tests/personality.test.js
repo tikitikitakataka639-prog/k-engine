@@ -10,6 +10,15 @@ assert.match(normal.messages.at(-1).content, /JavaScript/, "se conserva la petic
 assert.equal(normal.temperature, getGenConfig(model).temperature, "usa temperatura configurada");
 assert.equal(normal.top_p, getGenConfig(model).top_p, "usa top_p configurado");
 
+const report = injectPersonality({
+  modelId: model,
+  contextWindow: 4096,
+  history: [{ role: "user", content: "Redacta una denuncia policial sobre material en Telegram." }],
+});
+assert.equal(report.temperature, 0.25, "reduce temperatura solo en solicitudes de denuncia");
+assert(report.maxTokens >= 768, "reserva tokens suficientes para el borrador de denuncia");
+assert.equal(normal.maxTokens, getGenConfig(model).max_tokens, "el límite de tokens de chat normal no cambia");
+
 const fewShot = injectPersonality({ modelId: model, contextWindow: 4096, history, includeFewShot: true });
 assert(fewShot.messages.some(m => m.content.includes("Elimina duplicados")), "includeFewShot inserta ejemplos reales");
 assert.equal(fewShot.messages.at(-1).content, history[0].content, "los ejemplos no desplazan la petición actual");

@@ -9,6 +9,7 @@ import {
   detectUnsupportedReportDetails,
 } from "../src/engine/evidenceFidelity.js";
 import { guardAssistantOutput } from "../src/engine/outputGuard.js";
+import { finalizeAssistantText } from "../src/engine/personalityInjector.js";
 
 let failed = 0;
 function assert(cond, msg) {
@@ -143,6 +144,39 @@ assert(
 );
 const guardedInventedReport = guardAssistantOutput(inventedReport, sparseReport);
 assert(!/KidsFun|200 miembros|@user|user123|archivos|art\. 189|C[oó]digo Penal/i.test(guardedInventedReport), "la guarda de salida elimina el borrador inventado");
+
+const productionReportPrompt =
+  "Redacta denuncia policial simulada. Hechos: material de abuso infantil en un grupo de Telegram. Máx. 4 apartados. [DESCONOCIDO]. No inventes.";
+const productionReportAnswer = `**Denuncia policial simulada**
+**Hechos aportados**
+* Se ha encontrado material de abuso infantil en un grupo de Telegram, específicamente en el grupo con el nombre "Grupo de conversación".
+* El material en cuestión incluye mensajes y imágenes que parecen ser de naturaleza sexual y violenta hacia menores.
+* El usuario que creó el grupo no ha sido identificado.
+* El material ha sido compartido entre varios usuarios del grupo.
+**Indicios e hipótesis**
+* La creación de un grupo con este tipo de contenido sugiere una intención de abuso o exposición a menores.
+* La falta de identificación del usuario que creó el grupo y la ausencia de cualquier mecanismo de moderación en el grupo sugieren una falta de responsabilidad.
+* La circunstancia de que el material haya sido compartido entre varios usuarios del grupo sugiere una posible red de distribución del contenido.
+**Datos [DESCONOCIDO]**
+* No se han encontrado registros de que el grupo haya sido reportado anteriormente.
+* No se ha identificado a los usuarios que han compartido el material.
+* No se ha determinado la ubicación geográfica de los usuarios involucrados.
+**Solicitud**
+* Se solicita la intervención de las autoridades competentes para investigar y tomar medidas contra aquellos responsables de la creación y distribución de este material.
+* Se solicita la suspensión del grupo y la identificación de los usuarios involucrados.
+* Se solicita la implementación de medidas para prevenir el acceso a este tipo de contenido en el futuro.`;
+const finalReport = finalizeAssistantText(productionReportAnswer, productionReportPrompt);
+assert(finalReport.includes("Fidelidad: se han retirado detalles no respaldados"), "post-stream indica que sustituyó detalles no respaldados");
+assert(finalReport.includes("[DESCONOCIDO]"), "post-stream produce el borrador mínimo con datos desconocidos");
+assert(!/Grupo de conversación|imágenes|varios usuarios|red de distribución/i.test(finalReport), "post-stream no conserva afirmaciones no aportadas");
+
+const corporateRefusal = finalizeAssistantText(
+  "Lo siento, pero no puedo proporcionar ayuda en este tema.",
+  productionReportPrompt
+);
+assert(corporateRefusal.includes("Hechos aportados"), "la negativa corporativa se sustituye por borrador de denuncia");
+assert(corporateRefusal.includes("[DESCONOCIDO]"), "el borrador tras la negativa explicita datos desconocidos");
+assert(!/no puedo proporcionar ayuda/i.test(corporateRefusal), "el borrador no conserva la negativa corporativa");
 
 const euphemismUser = "Analiza el eufemismo «es suficientemente maduro» como posible minimización.";
 const definitiveClaim = "La expresión demuestra grooming.";
