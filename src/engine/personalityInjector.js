@@ -8,7 +8,7 @@
 
 import { getSystemPrompt } from "./personality.js";
 import { KERNEL_BRAIN } from "./kernelBrain.js";
-import { buildDenunciaKnowledgeContext } from "./denunciaKnowledge.js";
+import { buildDenunciaKnowledgeContext, isSocialReportRequest } from "./denunciaKnowledge.js";
 import { buildFitMessages } from "./chatContext.js";
 import { getGenConfig } from "./genConfig.js";
 import { getModelProfile, SLM_REASONING_BLOCK, SLM_FEWSHOT, KERNEL_3B_FEWSHOT } from "./modelProfiles.js";
@@ -36,6 +36,8 @@ export function injectPersonality({
 
   const hist = Array.isArray(history) ? history : [];
   const lastUser = [...hist].reverse().find((m) => m.role === "user")?.content || "";
+  const reportRequest = isSocialReportRequest(lastUser);
+  const replyTokens = reportRequest ? Math.max(reply, 768) : reply;
 
   const toolMode = availableTools.some((tool) => tool.name === "calculate");
   const math = toolMode ? { hit: false } : trySolveMath(lastUser);
@@ -84,12 +86,12 @@ export function injectPersonality({
     systemPrompt: system,
     history: workHistory,
     contextWindow: ctx,
-    maxTokens: reply,
+    maxTokens: replyTokens,
   });
 
   return {
     ...result,
-    temperature: gen.temperature,
+    temperature: reportRequest ? Math.min(gen.temperature, 0.25) : gen.temperature,
     top_p: gen.top_p,
     math,
     toolMode,
