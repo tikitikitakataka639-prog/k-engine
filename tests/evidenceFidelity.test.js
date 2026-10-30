@@ -109,6 +109,41 @@ assert(inventedDetails.some((i) => i.code === "unsupported_group_name"), "detect
 assert(inventedDetails.some((i) => i.code === "unsupported_url"), "detecta URLs no aportadas");
 assert(inventedDetails.some((i) => i.code === "unsupported_date"), "detecta fechas no aportadas");
 
+const sparseReport = "Redacta una denuncia policial: CP en un grupo de Telegram. No hay más datos.";
+const inventedReport = `**Denuncia policial**
+**Hechos aportados**
+* Se encontró material en el chat con el nombre "KidsFun".
+* El grupo tiene aproximadamente 200 miembros y los usuarios @user y user123 publicaron archivos.
+**Indicios**
+* Podría aplicarse el art. 189 del Código Penal.
+**Solicitud**
+* Investigar los hechos.`;
+const detectedReportDetails = detectUnsupportedReportDetails(sparseReport, inventedReport);
+for (const code of [
+  "unsupported_group_name",
+  "unsupported_member_count",
+  "unsupported_handle",
+  "unsupported_file",
+  "unsupported_legal_reference",
+]) {
+  assert(detectedReportDetails.some((issue) => issue.code === code), `detecta detalle de reporte no aportado: ${code}`);
+}
+const replacedReport = applyCaseFidelityGuard(inventedReport, sparseReport);
+assert(replacedReport.fidelity.replacedWithMinimalDraft === true, "reemplaza el borrador contaminado por uno mínimo");
+assert(replacedReport.text.includes("[DESCONOCIDO]"), "el borrador mínimo explicita datos desconocidos");
+assert(!/KidsFun|200 miembros|@user|user123|archivos|art\. 189|C[oó]digo Penal/i.test(replacedReport.text), "el borrador sustituido no conserva detalles inventados");
+const knownHandleIssues = detectUnsupportedReportDetails(
+  "El reporte incluye el usuario @user.",
+  "El usuario @user publicó un archivo."
+);
+assert(!knownHandleIssues.some((issue) => issue.code === "unsupported_handle"), "no marca un identificador aportado por el usuario");
+assert(
+  !detectUnsupportedReportDetails("El reporte incluye el usuario @user.", "No consta si se aportaron archivos.").some((issue) => issue.code === "unsupported_file"),
+  "no marca como inventado un archivo expresamente desconocido"
+);
+const guardedInventedReport = guardAssistantOutput(inventedReport, sparseReport);
+assert(!/KidsFun|200 miembros|@user|user123|archivos|art\. 189|C[oó]digo Penal/i.test(guardedInventedReport), "la guarda de salida elimina el borrador inventado");
+
 const euphemismUser = "Analiza el eufemismo «es suficientemente maduro» como posible minimización.";
 const definitiveClaim = "La expresión demuestra grooming.";
 assert(
