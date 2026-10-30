@@ -6,6 +6,37 @@
  * al inicio de una frase con nombres propios.
  */
 
+import { buildMinimalReportDraft, isSocialReportRequest } from "./denunciaKnowledge.js";
+
+const REPLACED_REPORT_ISSUE_CODES = new Set([
+  "invented_names",
+  "unsupported_date",
+  "unsupported_url",
+  "unsupported_evidence_modality",
+  "unsupported_file",
+  "unsupported_group_name",
+  "unsupported_handle",
+  "unsupported_member_count",
+  "unsupported_legal_reference",
+]);
+
+function sentenceAt(text, index) {
+  const start = Math.max(
+    text.lastIndexOf(".", index),
+    text.lastIndexOf("!", index),
+    text.lastIndexOf("?", index),
+    text.lastIndexOf("\n", index)
+  ) + 1;
+  const ends = [text.indexOf(".", index), text.indexOf("!", index), text.indexOf("?", index), text.indexOf("\n", index)]
+    .filter((end) => end >= 0);
+  const end = ends.length ? Math.min(...ends) : text.length;
+  return text.slice(start, end);
+}
+
+function explicitlyUnknown(sentence) {
+  return /(?:\bno\s+(?:consta|se\s+sabe|se\s+indic[oó]|(?:se\s+(?:han\s+)?)?aport(?:ad[oa]s?|[oó])|hay|aparece|figura|se\s+identific[oó])\b|\bdesconocid[oa]\b|\bsin\s+(?:especificar|indicar|aportar|identificar|constar)\b|\[DESCONOCIDO\])/i.test(sentence);
+}
+
 export function extractProperNameCandidates(text) {
   const t = String(text || "");
   const found = new Set();
@@ -115,18 +146,33 @@ export function detectUnsupportedReportDetails(userText, assistantText) {
       re: /\b(?:audios?|im[aá]genes?|fotos?|fotograf[ií]as?|v[ií]deos?|videos?|capturas de pantalla)\b/gi,
       label: "una modalidad concreta de evidencia (audio/imagen/vídeo)",
     },
+    {
+      code: "unsupported_file",
+      re: /\b(?:archivos?|ficheros?|documentos?)\b/gi,
+      label: "un archivo o documento",
+    },
+    {
+      code: "unsupported_handle",
+      re: /(?:@[a-z\d_][a-z\d_.-]{1,}|\buser\d{2,}\b)/gi,
+      label: "un identificador de usuario",
+    },
+    {
+      code: "unsupported_member_count",
+      re: /\b\d[\d.,]*\s+(?:miembros?|usuarios?|participantes?)\b/gi,
+      label: "un recuento de miembros o participantes",
+    },
+    {
+      code: "unsupported_legal_reference",
+      re: /\b(?:art(?:ículo|\.?)\s*\d+(?:\s*(?:bis|ter|quater))?|c[oó]digo\s+penal|ley\s+\d+(?:\/\d+)?(?:\s*,?\s*de\s+\d{1,2}\s+de\s+\w+\s+de\s+\d{4})?)\b/gi,
+      label: "una cita o referencia legal",
+    },
   ];
 
   for (const { code, re, label } of unsupportedPatterns) {
     const matches = [...a.matchAll(re)];
     const unsupported = matches.some((match) => {
       if (u.includes(match[0].toLowerCase())) return false;
-      if (code !== "unsupported_evidence_modality") return true;
-      const start = Math.max(a.lastIndexOf(".", match.index), a.lastIndexOf("\n", match.index)) + 1;
-      const endCandidates = [a.indexOf(".", match.index), a.indexOf("\n", match.index)].filter((i) => i >= 0);
-      const end = endCandidates.length ? Math.min(...endCandidates) : a.length;
-      const sentence = a.slice(start, end);
-      return !/(?:no\s+(?:consta|se\s+sabe|se\s+indic[oó]|se\s+aport[oó]|hay)|desconocid[oa]|sin\s+(?:especificar|indicar|aportar)|si\s+(?:existe|hay)|\[DESCONOCIDO\])/i.test(sentence);
+      return !explicitlyUnknown(sentenceAt(a, match.index));
     });
     if (unsupported) {
       issues.push({
@@ -137,9 +183,10 @@ export function detectUnsupportedReportDetails(userText, assistantText) {
   }
 
   const namedGroups = [
-    ...a.matchAll(/\b(?:grupo|canal)\s+(?:de\s+telegram\s+)?(?:llamado|denominado|titulado|conocido\s+como)\s+["«]?([^"»\n,.;]{2,60})/gi),
-    ...a.matchAll(/\b(?:grupo|canal)\s+["«]([^"»\n]{2,60})["»]/gi),
-  ].map((match) => match[1].trim());
+    ...a.matchAll(/\b(?:grupo|canal|chat)(?:\s+de\s+telegram)?\s+(?:(?:llamado|denominado|titulado|conocido\s+como)\s+|con\s+el\s+nombre(?:\s+de)?\s+)["«]?([^"»\n,.;]{2,60})/gi),
+    ...a.matchAll(/\b(?:grupo|canal|chat)\s+["«]([^"»\n]{2,60})["»]/gi),
+  ].filter((match) => !explicitlyUnknown(sentenceAt(a, match.index)))
+    .map((match) => match[1].trim());
   if (namedGroups.some((name) => name !== "[DESCONOCIDO]" && !u.toLowerCase().includes(name.toLowerCase()))) {
     issues.push({
       code: "unsupported_group_name",
@@ -228,19 +275,35 @@ export function buildFidelityCorrection(userText, assistantText, validation) {
 
 export function applyCaseFidelityGuard(raw, userText) {
   const u = String(userText || "");
+  const isReportRequest = isSocialReportRequest(u);
   const analyticalSignals =
     /versi[oó]n|hechos|indicios|hip[oó]tesis|tarjeta|prueba|evidencia|analiza|contradic|testigo|c[aá]mara|grabaci[oó]n|declaraci[oó]n|investigaci[oó]n|corrobor|autor[ií]a|denuncia|report(?:e|ar)|grooming|captaci[oó]n|eufemismo|lenguaje\s+codificado|\bmap\b|pro[\s-]?contacto/i.test(
       u
     );
 
   // Do not run a case-analysis correction on every long user message.
-  if (!analyticalSignals) {
+  if (!analyticalSignals && !isReportRequest) {
     return { text: raw, fidelity: { ok: true, issues: [], skipped: true } };
   }
 
   const validation = validateCaseFidelity(u, raw);
   if (validation.ok) {
     return { text: raw, fidelity: { ok: true, issues: [] } };
+  }
+
+  const reportIssues = validation.issues.filter((issue) => REPLACED_REPORT_ISSUE_CODES.has(issue.code));
+  if (isReportRequest && reportIssues.length) {
+    const codes = [...new Set(reportIssues.map((issue) => issue.code))];
+    return {
+      text: `Fidelidad: se han retirado detalles no respaldados (${codes.join(", ")}).\n\n${buildMinimalReportDraft(u)}`,
+      fidelity: {
+        ok: false,
+        issues: validation.issues,
+        corrected: true,
+        preservedOriginal: false,
+        replacedWithMinimalDraft: true,
+      },
+    };
   }
 
   return {
