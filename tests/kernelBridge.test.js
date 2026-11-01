@@ -3,6 +3,7 @@ import {
   BRIDGE_PROTOCOL,
   KERNEL_ALLOWED_ORIGINS,
   isAllowedKernelOrigin,
+  postToKernel,
 } from "../src/engine/kernelBridge.js";
 
 const officialLovableOrigin = "https://project-kernel-release-1-0-0.lovable.app";
@@ -18,5 +19,24 @@ assert.equal(BRIDGE_PROTOCOL.request, "KERNEL_REQUEST", "request protocol name r
 assert.equal(BRIDGE_PROTOCOL.ready, "KENGINE_BRIDGE_READY", "ready protocol name remains stable");
 assert.equal(BRIDGE_PROTOCOL.response, "KENGINE_RESPONSE", "response protocol name remains stable");
 assert.equal(BRIDGE_PROTOCOL.error, "KENGINE_ERROR", "error protocol name remains stable");
+
+const sent = [];
+const opener = {
+  closed: false,
+  postMessage: (payload, targetOrigin) => sent.push({ payload, targetOrigin }),
+};
+assert.equal(
+  postToKernel(opener, { type: BRIDGE_PROTOCOL.ready }, officialLovableOrigin),
+  true,
+  "valid handshake reply is sent",
+);
+assert.equal(sent.length, 1, "reply is sent exactly once");
+assert.equal(sent[0].targetOrigin, officialLovableOrigin, "reply uses the validated event origin");
+assert.equal(
+  postToKernel(opener, { type: BRIDGE_PROTOCOL.ready }, "https://unlisted.example"),
+  false,
+  "reply to an unlisted origin is rejected",
+);
+assert.equal(sent.length, 1, "rejected origin receives no message");
 
 console.log("KERNEL bridge origin and protocol tests passed");
