@@ -277,21 +277,28 @@ export function EngineProvider({ children }) {
   useEffect(() => {
     const opener = window.opener;
     if (!opener) return undefined;
-    const announce = () => {
+    const announce = (preferredOrigin) => {
       try {
         if (!opener.closed) {
           postToKernel(opener, {
             type: BRIDGE_PROTOCOL.ready,
             modelReady: Boolean(mmRef.current.loadedId) && mmRef.current.models[mmRef.current.loadedId]?.status === "READY",
             model: mmRef.current.loadedId || null,
-          });
+          }, preferredOrigin);
         }
       } catch {}
     };
     const onMessage = (event) => {
       if (!isAllowedKernelOrigin(event.origin) || event.source !== window.opener) return;
       const data = event.data;
-      if (!data || data.type !== BRIDGE_PROTOCOL.request) return;
+      if (!data || typeof data !== "object") return;
+      // KERNEL repite el saludo hasta recibir READY: no dependemos de un único
+      // mensaje espontáneo que podría perderse durante el montaje de React.
+      if (data.type === BRIDGE_PROTOCOL.hello) {
+        announce(event.origin);
+        return;
+      }
+      if (data.type !== BRIDGE_PROTOCOL.request) return;
       const requestId = typeof data.requestId === "string" ? data.requestId.slice(0, 120) : "";
       const prompt = typeof data.message === "string" ? data.message.trim() : "";
       const replyError = (error, code) => {
