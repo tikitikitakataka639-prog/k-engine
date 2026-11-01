@@ -13,6 +13,7 @@ assert(!isAllowedKernelOrigin("http://project-kernel-release-1-0-0.lovable.app")
 assert(!isAllowedKernelOrigin("https://project-kernel-release-1-0-0.lovable.app.attacker.example"), "lookalike origin is rejected");
 assert(!isAllowedKernelOrigin("https://unlisted.example"), "unlisted origin is rejected");
 
+assert.equal(BRIDGE_PROTOCOL.hello, "KERNEL_PING", "handshake ping protocol name is stable");
 assert.equal(BRIDGE_PROTOCOL.request, "KERNEL_REQUEST", "request protocol name remains stable");
 assert.equal(BRIDGE_PROTOCOL.ready, "KENGINE_BRIDGE_READY", "ready protocol name remains stable");
 assert.equal(BRIDGE_PROTOCOL.response, "KENGINE_RESPONSE", "response protocol name remains stable");
