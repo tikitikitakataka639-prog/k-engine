@@ -76,10 +76,14 @@ export function resolveKernelReplyOrigin(eventOrigin) {
  */
 export function postToKernel(opener, payload, preferredOrigin) {
   if (!opener || opener.closed) return false;
+  // Si el mensaje procede de un evento validado, responder únicamente a ese origen.
+  // Evita difundir READY a otros orígenes permitidos y elimina respuestas duplicadas.
   const targets = [];
-  if (preferredOrigin && isAllowedKernelOrigin(preferredOrigin)) targets.push(preferredOrigin);
-  for (const o of allAllowedOrigins()) {
-    if (!targets.includes(o)) targets.push(o);
+  if (preferredOrigin) {
+    if (!isAllowedKernelOrigin(preferredOrigin)) return false;
+    targets.push(preferredOrigin);
+  } else {
+    targets.push(...allAllowedOrigins());
   }
   let ok = false;
   for (const origin of targets) {
@@ -96,6 +100,7 @@ export function postToKernel(opener, payload, preferredOrigin) {
 }
 
 export const BRIDGE_PROTOCOL = {
+  hello: "KERNEL_PING",
   request: "KERNEL_REQUEST",
   ready: "KENGINE_BRIDGE_READY",
   response: "KENGINE_RESPONSE",
